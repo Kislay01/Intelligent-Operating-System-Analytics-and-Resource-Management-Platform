@@ -37,6 +37,9 @@ def window_features(df: pd.DataFrame, window: str = "1min") -> pd.DataFrame:
         feats["os_events"] = ev.reindex(feats.index, fill_value=0)
     else:
         feats["os_events"] = 0
+    # Only windows in which something was logged: long idle gaps (machine off, WSL stopped)
+    # would otherwise dominate the data and make every burst of activity look anomalous.
+    feats = feats[feats["lines"] > 0]
     return feats.astype(float)
 
 
