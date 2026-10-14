@@ -1,0 +1,8 @@
+{
+  "processes": 65,
+  "psutil_ms_per_sample": 17.69,
+  "procfs_ms_per_sample": 7.08,
+  "recorder_cpu_percent_at_2s": 0.4,
+  "speedup_procfs_vs_psutil": 2.5,
+  "_seconds": 10.6
+}

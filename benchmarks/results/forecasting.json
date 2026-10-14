@@ -1,0 +1,91 @@
+{
+  "series": 40,
+  "horizon_samples": 30,
+  "by_model": [
+    {
+      "model": "Holt (damped trend)",
+      "MAE": 1.115,
+      "MAPE": 2.381,
+      "mape_reduction_vs_naive_%": 25.1
+    },
+    {
+      "model": "Quantile GBM",
+      "MAE": 1.2,
+      "MAPE": 2.6,
+      "mape_reduction_vs_naive_%": 18.2
+    },
+    {
+      "model": "Auto-selected",
+      "MAE": 1.401,
+      "MAPE": 2.989,
+      "mape_reduction_vs_naive_%": 5.9
+    },
+    {
+      "model": "Naive (last value)",
+      "MAE": 1.487,
+      "MAPE": 3.177,
+      "mape_reduction_vs_naive_%": 0.0
+    },
+    {
+      "model": "Moving average (10)",
+      "MAE": 1.624,
+      "MAPE": 3.448,
+      "mape_reduction_vs_naive_%": -8.5
+    },
+    {
+      "model": "Linear trend",
+      "MAE": 2.027,
+      "MAPE": 4.357,
+      "mape_reduction_vs_naive_%": -37.1
+    }
+  ],
+  "mape_by_kind": [
+    {
+      "kind": "daily_cycle",
+      "Auto-selected": 6.139,
+      "Holt (damped trend)": 3.965,
+      "Linear trend": 14.965,
+      "Moving average (10)": 8.53,
+      "Naive (last value)": 6.312,
+      "Quantile GBM": 4.738
+    },
+    {
+      "kind": "gc_sawtooth",
+      "Auto-selected": 5.505,
+      "Holt (damped trend)": 4.531,
+      "Linear trend": 3.689,
+      "Moving average (10)": 4.498,
+      "Naive (last value)": 4.609,
+      "Quantile GBM": 4.633
+    },
+    {
+      "kind": "leak",
+      "Auto-selected": 0.829,
+      "Holt (damped trend)": 0.836,
+      "Linear trend": 0.807,
+      "Moving average (10)": 1.949,
+      "Naive (last value)": 1.713,
+      "Quantile GBM": 0.84
+    },
+    {
+      "kind": "stable",
+      "Auto-selected": 1.341,
+      "Holt (damped trend)": 1.244,
+      "Linear trend": 1.326,
+      "Moving average (10)": 1.322,
+      "Naive (last value)": 1.729,
+      "Quantile GBM": 1.637
+    },
+    {
+      "kind": "step_load",
+      "Auto-selected": 1.131,
+      "Holt (damped trend)": 1.33,
+      "Linear trend": 0.999,
+      "Moving average (10)": 0.941,
+      "Naive (last value)": 1.524,
+      "Quantile GBM": 1.154
+    }
+  ],
+  "leak_mape_reduction_best_vs_naive_%": 52.9,
+  "_seconds": 110.6
+}

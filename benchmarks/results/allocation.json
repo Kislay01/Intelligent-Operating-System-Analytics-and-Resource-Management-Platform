@@ -1,0 +1,277 @@
+{
+  "cpus": 2,
+  "batch_hogs": 4,
+  "trials": 3,
+  "duration_s": 8.0,
+  "cgroup_version": 1,
+  "summary": [
+    {
+      "policy": "default (no control)",
+      "p50_ms": 0.083,
+      "p95_ms": 4.828,
+      "p99_ms": 5.154,
+      "p99_std": 0.249,
+      "batch_cpu_s": 14.653,
+      "p99_reduction_%": 0.0,
+      "batch_throughput_%": 100.0
+    },
+    {
+      "policy": "static nice 19",
+      "p50_ms": 0.077,
+      "p95_ms": 0.099,
+      "p99_ms": 0.153,
+      "p99_std": 0.062,
+      "batch_cpu_s": 14.317,
+      "p99_reduction_%": 97.0,
+      "batch_throughput_%": 97.7
+    },
+    {
+      "policy": "rule-based",
+      "p50_ms": 0.077,
+      "p95_ms": 0.105,
+      "p99_ms": 1.056,
+      "p99_std": 1.279,
+      "batch_cpu_s": 14.42,
+      "p99_reduction_%": 79.5,
+      "batch_throughput_%": 98.4
+    },
+    {
+      "policy": "Q-learning",
+      "p50_ms": 0.077,
+      "p95_ms": 0.103,
+      "p99_ms": 0.348,
+      "p99_std": 0.289,
+      "batch_cpu_s": 14.32,
+      "p99_reduction_%": 93.2,
+      "batch_throughput_%": 97.7
+    },
+    {
+      "policy": "Q-learning + cgroup",
+      "p50_ms": 0.081,
+      "p95_ms": 0.111,
+      "p99_ms": 2.864,
+      "p99_std": 0.072,
+      "batch_cpu_s": 14.317,
+      "p99_reduction_%": 44.4,
+      "batch_throughput_%": 97.7
+    }
+  ],
+  "raw": [
+    {
+      "samples": 1120,
+      "p50_ms": 0.089,
+      "p95_ms": 4.821,
+      "p99_ms": 5.273,
+      "max_ms": 7.702,
+      "mean_ms": 1.16,
+      "batch_cpu_seconds": 14.66,
+      "nice_chosen": null,
+      "rollbacks": 0,
+      "policy": "default (no control)",
+      "trial": 0
+    },
+    {
+      "samples": 1373,
+      "p50_ms": 0.078,
+      "p95_ms": 0.104,
+      "p99_ms": 0.221,
+      "max_ms": 2.438,
+      "mean_ms": 0.089,
+      "batch_cpu_seconds": 14.32,
+      "nice_chosen": null,
+      "rollbacks": 0,
+      "policy": "static nice 19",
+      "trial": 0
+    },
+    {
+      "samples": 1370,
+      "p50_ms": 0.077,
+      "p95_ms": 0.103,
+      "p99_ms": 0.318,
+      "max_ms": 3.786,
+      "mean_ms": 0.1,
+      "batch_cpu_seconds": 14.5,
+      "nice_chosen": [
+        10
+      ],
+      "rollbacks": 0,
+      "policy": "rule-based",
+      "trial": 0
+    },
+    {
+      "samples": 1373,
+      "p50_ms": 0.079,
+      "p95_ms": 0.106,
+      "p99_ms": 0.146,
+      "max_ms": 2.682,
+      "mean_ms": 0.09,
+      "batch_cpu_seconds": 14.36,
+      "nice_chosen": [
+        19
+      ],
+      "rollbacks": 0,
+      "policy": "Q-learning",
+      "trial": 0
+    },
+    {
+      "samples": 1361,
+      "p50_ms": 0.081,
+      "p95_ms": 0.119,
+      "p99_ms": 2.784,
+      "max_ms": 3.296,
+      "mean_ms": 0.137,
+      "batch_cpu_seconds": 14.24,
+      "nice_chosen": [
+        10,
+        19
+      ],
+      "rollbacks": 0,
+      "policy": "Q-learning + cgroup",
+      "trial": 0
+    },
+    {
+      "samples": 1129,
+      "p50_ms": 0.08,
+      "p95_ms": 4.825,
+      "p99_ms": 4.868,
+      "max_ms": 7.003,
+      "mean_ms": 1.11,
+      "batch_cpu_seconds": 14.63,
+      "nice_chosen": null,
+      "rollbacks": 0,
+      "policy": "default (no control)",
+      "trial": 1
+    },
+    {
+      "samples": 1378,
+      "p50_ms": 0.073,
+      "p95_ms": 0.092,
+      "p99_ms": 0.101,
+      "max_ms": 0.26,
+      "mean_ms": 0.076,
+      "batch_cpu_seconds": 14.4,
+      "nice_chosen": null,
+      "rollbacks": 0,
+      "policy": "static nice 19",
+      "trial": 1
+    },
+    {
+      "samples": 1362,
+      "p50_ms": 0.078,
+      "p95_ms": 0.108,
+      "p99_ms": 2.533,
+      "max_ms": 5.448,
+      "mean_ms": 0.13,
+      "batch_cpu_seconds": 14.4,
+      "nice_chosen": [
+        10
+      ],
+      "rollbacks": 0,
+      "policy": "rule-based",
+      "trial": 1
+    },
+    {
+      "samples": 1363,
+      "p50_ms": 0.077,
+      "p95_ms": 0.103,
+      "p99_ms": 0.679,
+      "max_ms": 22.812,
+      "mean_ms": 0.123,
+      "batch_cpu_seconds": 14.27,
+      "nice_chosen": [
+        19
+      ],
+      "rollbacks": 0,
+      "policy": "Q-learning",
+      "trial": 1
+    },
+    {
+      "samples": 1352,
+      "p50_ms": 0.084,
+      "p95_ms": 0.117,
+      "p99_ms": 2.925,
+      "max_ms": 5.463,
+      "mean_ms": 0.154,
+      "batch_cpu_seconds": 14.36,
+      "nice_chosen": [
+        19
+      ],
+      "rollbacks": 0,
+      "policy": "Q-learning + cgroup",
+      "trial": 1
+    },
+    {
+      "samples": 1124,
+      "p50_ms": 0.08,
+      "p95_ms": 4.838,
+      "p99_ms": 5.321,
+      "max_ms": 8.839,
+      "mean_ms": 1.125,
+      "batch_cpu_seconds": 14.67,
+      "nice_chosen": null,
+      "rollbacks": 0,
+      "policy": "default (no control)",
+      "trial": 2
+    },
+    {
+      "samples": 1373,
+      "p50_ms": 0.08,
+      "p95_ms": 0.101,
+      "p99_ms": 0.137,
+      "max_ms": 4.272,
+      "mean_ms": 0.092,
+      "batch_cpu_seconds": 14.23,
+      "nice_chosen": null,
+      "rollbacks": 0,
+      "policy": "static nice 19",
+      "trial": 2
+    },
+    {
+      "samples": 1371,
+      "p50_ms": 0.075,
+      "p95_ms": 0.103,
+      "p99_ms": 0.316,
+      "max_ms": 4.82,
+      "mean_ms": 0.103,
+      "batch_cpu_seconds": 14.36,
+      "nice_chosen": [
+        10
+      ],
+      "rollbacks": 0,
+      "policy": "rule-based",
+      "trial": 2
+    },
+    {
+      "samples": 1371,
+      "p50_ms": 0.075,
+      "p95_ms": 0.1,
+      "p99_ms": 0.218,
+      "max_ms": 2.96,
+      "mean_ms": 0.088,
+      "batch_cpu_seconds": 14.33,
+      "nice_chosen": [
+        19
+      ],
+      "rollbacks": 0,
+      "policy": "Q-learning",
+      "trial": 2
+    },
+    {
+      "samples": 1358,
+      "p50_ms": 0.077,
+      "p95_ms": 0.098,
+      "p99_ms": 2.883,
+      "max_ms": 4.145,
+      "mean_ms": 0.14,
+      "batch_cpu_seconds": 14.35,
+      "nice_chosen": [
+        10,
+        19
+      ],
+      "rollbacks": 0,
+      "policy": "Q-learning + cgroup",
+      "trial": 2
+    }
+  ],
+  "_seconds": 126.3
+}

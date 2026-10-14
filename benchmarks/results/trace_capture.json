@@ -1,0 +1,9 @@
+{
+  "bursts": 70,
+  "processes": 4,
+  "probe_burst_ms_median": 65.1,
+  "probe_expected_ms": 60,
+  "replayed_jobs": 60,
+  "recommended": "Stride (q=1)",
+  "_seconds": 4.0
+}

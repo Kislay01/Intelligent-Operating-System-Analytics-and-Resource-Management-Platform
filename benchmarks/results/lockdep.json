@@ -1,0 +1,8 @@
+{
+  "programs": 200,
+  "lockdep_detection_rate": 1.0,
+  "lockdep_false_positive_rate": 0.0,
+  "observed_deadlocks_short_sections": 0.0,
+  "observed_deadlocks_2ms_sections": 0.68,
+  "_seconds": 9.2
+}

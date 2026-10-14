@@ -1,0 +1,119 @@
+{
+  "policies": [
+    {
+      "algorithm": "SRTF",
+      "avg_waiting": 30.02,
+      "avg_response": 26.95,
+      "p95_response": 67.36,
+      "fairness": 0.79,
+      "context_switches": 10.28
+    },
+    {
+      "algorithm": "SJF",
+      "avg_waiting": 37.33,
+      "avg_response": 37.33,
+      "p95_response": 75.41,
+      "fairness": 0.81,
+      "context_switches": 9.0
+    },
+    {
+      "algorithm": "FCFS",
+      "avg_waiting": 44.95,
+      "avg_response": 44.95,
+      "p95_response": 80.52,
+      "fairness": 0.65,
+      "context_switches": 9.0
+    },
+    {
+      "algorithm": "Priority (NP)",
+      "avg_waiting": 45.19,
+      "avg_response": 45.19,
+      "p95_response": 84.02,
+      "fairness": 0.63,
+      "context_switches": 9.0
+    },
+    {
+      "algorithm": "Priority (P, aging)",
+      "avg_waiting": 45.37,
+      "avg_response": 32.23,
+      "p95_response": 68.25,
+      "fairness": 0.6,
+      "context_switches": 12.72
+    },
+    {
+      "algorithm": "EEVDF (slice=3)",
+      "avg_waiting": 55.53,
+      "avg_response": 10.26,
+      "p95_response": 26.43,
+      "fairness": 0.79,
+      "context_switches": 34.88
+    },
+    {
+      "algorithm": "Lottery (q=1)",
+      "avg_waiting": 55.75,
+      "avg_response": 5.13,
+      "p95_response": 18.09,
+      "fairness": 0.8,
+      "context_switches": 79.32
+    },
+    {
+      "algorithm": "Stride (q=1)",
+      "avg_waiting": 56.99,
+      "avg_response": 1.86,
+      "p95_response": 4.34,
+      "fairness": 0.86,
+      "context_switches": 92.92
+    },
+    {
+      "algorithm": "CFS (lat=6)",
+      "avg_waiting": 57.02,
+      "avg_response": 2.48,
+      "p95_response": 5.37,
+      "fairness": 0.86,
+      "context_switches": 71.36
+    },
+    {
+      "algorithm": "Round Robin (q=4)",
+      "avg_waiting": 58.62,
+      "avg_response": 11.47,
+      "p95_response": 22.11,
+      "fairness": 0.8,
+      "context_switches": 27.56
+    },
+    {
+      "algorithm": "MLFQ (4/8/FCFS)",
+      "avg_waiting": 59.18,
+      "avg_response": 8.8,
+      "p95_response": 16.64,
+      "fairness": 0.83,
+      "context_switches": 24.6
+    }
+  ],
+  "burst_prediction": [
+    {
+      "method": "gradient_boosting",
+      "MAE": 3.439,
+      "improvement_vs_exp_avg_%": 46.2,
+      "wins": 12
+    },
+    {
+      "method": "exp_avg_tuned",
+      "MAE": 5.256,
+      "improvement_vs_exp_avg_%": 17.8,
+      "wins": 15
+    },
+    {
+      "method": "exp_avg_a=0.5",
+      "MAE": 6.396,
+      "improvement_vs_exp_avg_%": 0.0,
+      "wins": 2
+    },
+    {
+      "method": "last_burst",
+      "MAE": 8.298,
+      "improvement_vs_exp_avg_%": -29.7,
+      "wins": 3
+    }
+  ],
+  "_seconds": 3.1
+}

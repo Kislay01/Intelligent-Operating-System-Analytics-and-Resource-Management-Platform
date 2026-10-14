@@ -1,0 +1,72 @@
+{
+  "mattson_matches_simulation": true,
+  "mattson_seconds": 0.005,
+  "per_size_simulation_seconds": 0.162,
+  "mattson_speedup": 34.1,
+  "scan_workload_faults_8_frames": {
+    "FIFO": 1397,
+    "LRU": 1397,
+    "Clock": 1397,
+    "ARC": 1205,
+    "Optimal": 1205
+  },
+  "algorithmic_traces_8_frames": {
+    "matrix_row_major": {
+      "refs": 32,
+      "pages": 32,
+      "FIFO": 32,
+      "LRU": 32,
+      "ARC": 32,
+      "Optimal": 32
+    },
+    "matrix_col_major": {
+      "refs": 4096,
+      "pages": 32,
+      "FIFO": 4096,
+      "LRU": 4096,
+      "ARC": 4096,
+      "Optimal": 3176
+    },
+    "matmul_naive": {
+      "refs": 20000,
+      "pages": 20,
+      "FIFO": 2216,
+      "LRU": 1970,
+      "ARC": 1920,
+      "Optimal": 1316
+    },
+    "matmul_blocked": {
+      "refs": 20000,
+      "pages": 15,
+      "FIFO": 24,
+      "LRU": 24,
+      "ARC": 24,
+      "Optimal": 17
+    },
+    "binary_search": {
+      "refs": 3812,
+      "pages": 438,
+      "FIFO": 3600,
+      "LRU": 3593,
+      "ARC": 2984,
+      "Optimal": 2344
+    },
+    "quicksort": {
+      "refs": 20000,
+      "pages": 29,
+      "FIFO": 29,
+      "LRU": 34,
+      "ARC": 34,
+      "Optimal": 29
+    },
+    "linked_list": {
+      "refs": 5893,
+      "pages": 64,
+      "FIFO": 5288,
+      "LRU": 5275,
+      "ARC": 5266,
+      "Optimal": 3701
+    }
+  },
+  "_seconds": 1.4
+}
