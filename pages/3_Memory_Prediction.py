@@ -118,7 +118,9 @@ with tab_leak:
         else:
             st.error(f"🔴 {len(sus)} suspected leak(s): " + ", ".join(f"{r.name} ({r.pid})" for r in sus.itertuples()))
         st.dataframe(fdf, hide_index=True, width="stretch",
-                     column_config={"suspected": st.column_config.CheckboxColumn("leak?")})
+                     column_config={"suspected": st.column_config.CheckboxColumn("leak?"),
+                                    "mk_p": st.column_config.NumberColumn("Mann-Kendall p", format="%.1e"),
+                                    "mk_z": st.column_config.NumberColumn("Mann-Kendall z", format="%.1f")})
         top = fdf.head(5)["pid"].tolist()
         sub = ph[ph["pid"].isin(top)]
         fig = go.Figure()
