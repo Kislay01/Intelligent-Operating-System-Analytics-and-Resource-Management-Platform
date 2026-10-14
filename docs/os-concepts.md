@@ -186,3 +186,90 @@ interactive tasks are left at full priority.
 
 **Classifier.** A Random Forest over behavioural features. Training data is generated from the OS behaviour that
 defines each class; evaluation uses stratified 5-fold cross-validation, and feature importances explain the model.
+
+---
+
+# Advanced topics
+
+## A. Reading the kernel directly
+
+| Quantity | Source | Computation |
+|---|---|---|
+| Process CPU% | `/proc/[pid]/stat` fields 14-15 (`utime`, `stime`, jiffies) | Δ(utime+stime) / CLK_TCK / Δwall × 100 |
+| System CPU% | `/proc/stat` `cpu` line | 1 − Δ(idle+iowait) / Δtotal |
+| Memory used | `/proc/meminfo` | MemTotal − MemAvailable |
+| RSS / PSS / USS | `/proc/[pid]/smaps_rollup` | PSS splits shared pages; USS = private clean + private dirty |
+| Kernel VM events | `/proc/vmstat` | `pgmajfault`, `pswpin/out`, `oom_kill` counters |
+| Contention | `/proc/pressure/{cpu,memory,io}` | share of time tasks were stalled (some/full) |
+
+Accounting granularity is one jiffy (1/CLK_TCK s, usually 10 ms), which bounds the resolution of burst tracing.
+
+## B. CFS and EEVDF
+
+**CFS** (Linux 2.6.23-6.5) keeps runnable tasks in a red-black tree ordered by *virtual runtime*. Running for Δt
+adds Δt × 1024 / weight to a task's vruntime, where weight comes from the nice value (nice 0 = 1024; each nice step
+changes CPU share by about 10%, the table ratio being 1.25). The scheduler always runs the leftmost (smallest
+vruntime) task. The slice is sched_latency × weight / Σweights, bounded below by min_granularity. Waking tasks are
+placed near min_vruntime with a capped sleeper credit, so interactive tasks run soon after waking.
+
+**EEVDF** (Linux ≥ 6.6) replaced CFS's heuristics with a cleaner rule. A task is *eligible* if its lag ≥ 0
+(it has received no more than its fair share). Among eligible tasks, it picks the one with the earliest *virtual
+deadline* = vruntime + slice / weight.
+
+**Stride and Lottery scheduling** are the textbook proportional-share schedulers. Stride (deterministic) runs the
+task with the smallest *pass* and adds stride = BIG / tickets. Lottery (randomised) draws a ticket each quantum.
+
+## C. Lock-order validation (lockdep)
+
+Linux's lockdep records, for every *lock class*, the set of locks held when it is acquired. It builds a directed
+graph of "A held while acquiring B". A cycle in that graph means two code paths can acquire the same locks in
+opposite orders, and that is a *possible* deadlock even if the timing that triggers it has never occurred.
+Detection costs one graph-reachability check per acquisition and finds bugs that testing almost never triggers.
+
+## D. ARC, WSClock and Mattson
+
+* **ARC** keeps two LRU lists of resident pages: T1 (seen once, recency) and T2 (seen at least twice, frequency).
+  It also keeps two *ghost* lists, B1 and B2, of recently evicted page numbers. A hit in B1 grows the target size
+  of T1; a hit in B2 shrinks it. ARC therefore tunes itself and resists scans, which flush plain LRU.
+* **WSClock** runs the clock hand over the frames but evicts only pages whose reference bit is clear *and* whose
+  last use is older than the working-set window τ.
+* **Mattson's stack algorithm.** For a stack algorithm such as LRU, the memory contents with n frames are a subset
+  of those with n + 1 frames. A reference with stack distance d therefore hits exactly when there are at least d
+  frames. One pass that computes stack distances yields the fault count for every memory size: the miss-ratio
+  curve.
+
+## E. Log template mining
+
+**Drain** stores templates in a fixed-depth tree keyed by token count and the first tokens. A new line joins the
+most similar template in its leaf if at least `st` of its tokens match; mismatching positions become `<*>`.
+Variables such as IPs, numbers and hex are masked first.
+
+**Grouping accuracy** is the fraction of lines whose predicted group contains exactly the lines of their
+ground-truth event.
+
+**DeepLog** treats the template sequence as a language: it predicts the next template from the previous h, and
+flags a line whose template is not among the top-k predictions.
+
+## F. cgroups
+
+Control groups apply limits and weights to sets of processes. In **cgroup v2** (a unified hierarchy):
+
+* `cpu.weight` (1-10000, default 100) sets the share of CPU under contention.
+* `cpu.max` ("quota period") is a hard cap.
+* `memory.high` throttles and reclaims; `memory.max` invokes the OOM killer inside the group.
+
+**cgroup v1** uses separate hierarchies per controller (`cpu.shares`, `cpu.cfs_quota_us`, `memory.limit_in_bytes`).
+
+## G. Learning an allocation policy
+
+The real system is slow and noisy to experiment on, so policies are learned in a simulator and then validated on
+the machine (*sim-to-real*):
+
+1. **Model.** A tick-based CFS: one interactive task (periodic bursts), batch hogs (controlled nice level), and
+   other services.
+2. **Calibration.** Measure the probe's p95 wake-up latency on the real machine at each batch nice level, then fit
+   the simulator's wake-up-preemption parameter to match.
+3. **Reward.** Batch throughput relative to its fair share, minus a penalty when interactive latency exceeds the SLO.
+4. **Learners.** A LinUCB contextual bandit (ridge regression per action plus an upper-confidence exploration
+   bonus) and tabular Q-learning (each scenario is a one-step episode, so Q(s, a) is a running average of rewards).
+5. **Deployment.** A closed loop of observe → decide → act → measure, with a PSI-based rollback guard.

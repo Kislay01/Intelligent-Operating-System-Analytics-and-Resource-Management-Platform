@@ -1,30 +1,40 @@
 # KernelSense
 
-**Intelligent Operating System Analytics and Resource Management Platform** — a Python platform that reads live data
-from the Linux kernel, applies classical OS algorithms to it, predicts resource behaviour with machine learning and
-acts on running processes through real OS controls.
+**Intelligent Operating System Analytics and Resource Management Platform.** A Python platform that reads the
+Linux kernel directly through `/proc`, PSI and cgroups. It replays real workloads through from-scratch
+implementations of OS algorithms, predicts resource behaviour with machine learning, and controls running processes
+in a closed loop. Every claim is backed by a reproducible benchmark.
 
 ![Overview](docs/screenshots/overview.png)
 
-| Module | OS concepts | What it does |
-|---|---|---|
-| **Process Monitoring** | PCB, process states, fork/exec tree, context switches, page faults, PSI | Live process table and tree read from `/proc`, workload classification from voluntary vs involuntary context switches, anomaly detection (zombies, D-state, orphans, fork storms, FD/thread leaks) |
-| **CPU Scheduling Recommendation** | FCFS, SJF, SRTF, Round Robin, Priority + aging, MLFQ, burst prediction | Discrete-event simulator with Gantt charts and full metrics, goal-based recommender (workload rules + simulation-validated ranking), exponential-average burst predictor, Linux mapping |
-| **Memory Usage Prediction** | Virtual memory, RSS, page cache, swap, OOM killer | Forecasting (naive, moving average, linear trend, Holt) evaluated against a baseline, prediction intervals, time-to-exhaustion alerts, per-process leak detection |
-| **Deadlock Prediction** | Coffman conditions, Banker's algorithm, RAG, wait-for graph | Safety and resource-request algorithms with traces, single/multi-instance detection, deadlock risk scoring, live `/proc/locks` wait-for graph |
-| **Page Replacement Simulation** | Demand paging, FIFO, LRU, Optimal, LFU, Clock, Belady's anomaly, working set | Step-by-step frame tables, fault curves across frame counts, automatic Belady's anomaly search, thrashing assessment |
-| **Log Analysis** | Kernel ring buffer, syslog/journald, OOM/segfault/hung-task/I-O error events | Multi-format parser, OS event rules with explanations, Isolation Forest + robust z-score anomaly detection on time windows |
-| **Performance Dashboard** | — | Streamlit dashboard with a live overview and one page per module |
-| **AI-Based Resource Allocation** | CFS weights (nice), CPU affinity, I/O priority, scheduling classes | Random Forest workload classifier, policy that maps classes to Linux levers, safe actuator (dry-run, allow-list, rollback, audit log) |
+## Headline results
+
+Measured on a 2-CPU Linux 6.x VM. Reproduce with `python benchmarks/run_all.py`; full report:
+[benchmarks/RESULTS.md](benchmarks/RESULTS.md).
+
+| Area | Result |
+|---|---|
+| Closed-loop allocation | Learned Q-learning policy cut p99 wake-up latency of a latency-sensitive task from **5.15 ms to 0.35 ms (−93%)** under 2× CPU oversubscription while keeping **98%** of batch throughput |
+| Kernel data layer | Pure `/proc` collector **2.5× faster than psutil** (7.1 vs 17.7 ms per full sample); recorder uses **0.4% CPU** at 2 s sampling |
+| OOM prediction | Recomputed `oom_score` from `/proc/[pid]/status` using the kernel's formula matches the kernel **exactly (±1) for 100%** of user processes |
+| Deadlock prediction | Lockdep-style lock-order validation detected **100% of 100 seeded lock-order bugs with 0 false positives**; none of those bugs actually deadlocked during testing |
+| Page replacement | Mattson single-pass LRU miss curve **matches simulation exactly**, 34× faster; tiled matmul: **24 vs 1,970** page faults; ARC matches Optimal on scan workloads where LRU/FIFO/Clock thrash |
+| Burst prediction | Gradient boosting cut next-CPU-burst MAE by **46%** versus exponential averaging on held-out sequences |
+| Memory | Leak detection F1 **0.96** (Mann-Kendall + sustained-growth test); best forecaster cuts MAPE on leaking processes by **53%** versus naive |
+| Logs | Drain template mining: grouping accuracy **0.97 (BGL), 0.998 (HDFS), 0.69 (Linux)** on Loghub; Isolation Forest window anomaly F1 **0.79** on BGL |
 
 <table>
 <tr>
-<td><img src="docs/screenshots/scheduling.png" alt="CPU scheduling comparison"></td>
-<td><img src="docs/screenshots/deadlock.png" alt="Resource allocation graph"></td>
+<td><img src="docs/screenshots/benchmarks.png" alt="Closed-loop allocation benchmark"></td>
+<td><img src="docs/screenshots/rl-policy.png" alt="Policy learning"></td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/page-replacement.png" alt="Page faults vs frames"></td>
-<td><img src="docs/screenshots/resource-allocation.png" alt="AI-based resource allocation"></td>
+<td><img src="docs/screenshots/lockdep.png" alt="Lock-order validation"></td>
+<td><img src="docs/screenshots/cfs-share.png" alt="CFS proportional share"></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/scheduling.png" alt="Scheduler comparison"></td>
+<td><img src="docs/screenshots/deadlock.png" alt="Resource allocation graph"></td>
 </tr>
 </table>
 
@@ -33,31 +43,113 @@ acts on running processes through real OS controls.
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────┐
-│ Interfaces   Streamlit dashboard (Overview.py + pages/)  ·  CLI        │
-├──────────────────────────────────────────────────────────────────────┤
-│ Actuator     nice · CPU affinity · ionice   (dry-run, allow-list,      │
-│              rollback, JSON action log)                                │
-├──────────────────────────────────────────────────────────────────────┤
-│ Engines      scheduling · memory · deadlock · paging · logs · allocator│
-├──────────────────────────────────────────────────────────────────────┤
-│ Storage      SQLite time-series store (system + per-process metrics)   │
-├──────────────────────────────────────────────────────────────────────┤
-│ Collectors   /proc/[pid]/{stat,status} · /proc/loadavg · /proc/pressure│
-│              /proc/locks · journald · syslog · dmesg   (+ psutil)      │
-└──────────────────────────────────────────────────────────────────────┘
-                               Linux kernel
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Interfaces   Streamlit dashboard · CLI · Prometheus exporter + Grafana        │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Control      closed-loop controller (observe → decide → act → measure)        │
+│              nice / CPU affinity / ionice / cgroup v2 (v1 fallback)           │
+│              safety: dry-run, allow-list, PSI-based rollback, audit log       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Learning     calibrated CFS contention simulator → Q-learning / LinUCB        │
+│              Random Forest workload classifier · quantile GBM forecaster      │
+│              gradient-boosted burst predictor · Isolation Forest · n-gram     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Engines      scheduling (FCFS…MLFQ, CFS, EEVDF, Stride, Lottery, trace replay)│
+│              memory (forecast, leak, OOM victim) · deadlock (Banker's, RAG,   │
+│              lockdep) · paging (FIFO…ARC, WSClock, Mattson, real traces) ·    │
+│              logs (Drain, events, DeepLog rule, incident correlation)         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Storage      SQLite time-series store                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Collectors   pure /proc collector: stat, status, smaps_rollup, oom_score,     │
+│              loadavg, vmstat, meminfo, pressure, locks · burst tracer ·       │
+│              journald/syslog/dmesg · optional eBPF run-queue latency          │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                   Linux kernel
 ```
 
 Design rules:
 
-* **The UI holds no OS logic.** Every algorithm lives in the `kernelsense` package; the dashboard and CLI only call it.
-* **Pluggable interfaces.** `Collector`, `Scheduler`, `ReplacementPolicy` and `Forecaster` are base classes, so new
-  policies or a pure-`/proc` collector can be added without touching the rest.
-* **Graceful degradation.** A capability probe checks for PSI, cgroup v2, `/proc/locks`, journald and syslog; missing
-  interfaces are skipped instead of failing.
-* **Safe by default.** Resource actions are simulated unless explicitly enabled and never touch system processes or
-  other users' processes.
+* **The UI holds no OS logic.** Every algorithm lives in the `kernelsense` package; the dashboard, CLI and exporter
+  only call it.
+* **Pluggable interfaces:** `Collector`, `Scheduler`, `ReplacementPolicy` and `Forecaster`.
+* **Graceful degradation.** A capability probe checks PSI, cgroup v1/v2, `/proc/locks`, smaps_rollup, BTF and
+  bpftrace, and skips features the kernel does not offer.
+* **Measured, not claimed.** Every ML component is compared with a non-ML baseline on held-out data, and the
+  closed-loop controller is evaluated against default Linux behaviour.
+
+---
+
+## Modules
+
+### 1. Process monitoring
+* Pure `/proc` collector. Process CPU% comes from `utime + stime` jiffy deltas, system and per-core CPU from
+  `/proc/stat`, and memory from `MemAvailable`. Context switches, faults, I/O, file descriptors and the process tree
+  are also collected.
+* Workload classification from voluntary vs involuntary context switches.
+* Anomaly detection: zombies, D-state, orphans, fork storms, and FD or thread explosions.
+* RSS/PSS/USS from `smaps_rollup`, plus `oom_score`, in the process detail view.
+
+### 2. CPU scheduling
+* FCFS, SJF, SRTF, Round Robin, Priority with aging, and MLFQ with priority boost.
+* Kernel-style proportional share:
+  - **CFS**: vruntime, the kernel's nice-to-weight table, sched_latency and min_granularity.
+  - **EEVDF**: lag-based eligibility and earliest virtual deadline.
+  - **Stride** and **Lottery**.
+* Metrics: waiting, turnaround and response time; p95/p99; throughput; utilisation; context switches; Jain's
+  fairness index.
+* **Live burst tracing.** CPU-time counters are sampled to segment real CPU bursts, which are replayed as a
+  scheduling workload.
+* Next-burst prediction: exponential averaging vs gradient boosting (walk-forward, held out).
+* Goal-based recommender (balanced, interactive, throughput or fairness) with Linux mappings.
+
+### 3. Memory usage prediction
+* Forecasters: naive, moving average, linear trend, Holt, and quantile gradient boosting with 5/50/95% intervals.
+  Each is evaluated against the naive baseline, and the best is auto-selected.
+* Leak detection: trend slope and R², Mann-Kendall significance, and a sustained-growth test that rejects step
+  changes.
+* **OOM victim prediction**: the kernel's own `oom_score` formula, combined with the forecast exhaustion time.
+
+### 4. Deadlock prediction
+* Banker's algorithm (safety and request), resource allocation graphs (single and multi-instance), and a risk
+  score.
+* Live wait-for graph from `/proc/locks`.
+* **Lock-order validation (lockdep):** a global lock-order graph flags a potential deadlock the moment an
+  acquisition would close a cycle, even if the run never hangs. `patch_threading()` validates unmodified code.
+
+### 5. Page replacement
+* FIFO, LRU, Optimal, LFU, Clock, **ARC** (adaptive, scan-resistant) and **WSClock**.
+* **Mattson's stack algorithm**: a one-pass LRU miss-ratio curve for every memory size, plus a reuse-distance
+  histogram.
+* Realistic traces:
+  - algorithmic, computed from array addresses (row vs column-major, naive vs tiled matmul, binary search,
+    quicksort, pointer chasing);
+  - real binaries via Valgrind `lackey`.
+* Belady's anomaly search and working-set/thrashing analysis.
+
+### 6. Log analysis
+* Parsers for syslog, journald and dmesg, and OS event rules (OOM, panic, lockup, hung task, segfault, I/O error,
+  thermal throttling, and others).
+* **Drain** template mining, a DeepLog-style next-template model (n-gram, top-k rule), and an Isolation Forest over
+  time windows.
+* **Incident correlation**: metric anomalies (robust z-score) matched to OS events to build a narrated timeline.
+* Evaluation on **Loghub** (BGL, HDFS, Linux).
+
+### 7. Performance dashboard and observability
+* Streamlit dashboard: an overview plus eight pages, including **Benchmarks**.
+* Dependency-free **Prometheus exporter** (`kernelsense export`) and a **Grafana** dashboard (`grafana/`).
+* Optional **eBPF** run-queue latency histogram via `bpftrace` (`python -m kernelsense.ebpf`).
+
+### 8. AI-based resource allocation
+* Random Forest workload classifier (cross-validated, with feature importances) and a policy mapping classes to
+  nice, affinity and ionice.
+* **cgroup manager**: v2 `cpu.weight`, `cpu.max`, `memory.high`/`max`, with a v1 fallback.
+* **Calibrated contention simulator.** A tick-based CFS model with slices, sleeper credit and weighted wakeup
+  preemption. Its preemption parameter is fitted to wake-up latency measured on the machine.
+* **LinUCB** contextual bandit and **tabular Q-learning**, trained in simulation and evaluated on held-out scenarios
+  against fixed baselines.
+* **Closed-loop controller.** It observes per-CPU contention, applies the learned batch priority via nice or a
+  cgroup, and rolls back when CPU pressure (PSI) worsens.
 
 ---
 
@@ -71,155 +163,98 @@ cd Intelligent-Operating-System-Analytics-and-Resource-Management-Platform
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-streamlit run Overview.py
+streamlit run Overview.py              # dashboard on http://localhost:8501
+python benchmarks/run_all.py           # reproduce every reported number (~5-8 min)
+python -m pytest -q                    # 109 tests incl. property-based tests
 ```
 
-Open http://localhost:8501. The dashboard starts a background recorder that samples metrics every 2 seconds into
-`data/kernelsense.db`; forecasting and leak detection improve as history accumulates.
+**Root and cgroups.** Raising a nice value works for your own processes. Lowering it, and the cgroup actuation
+mode, need root or a delegated cgroup. The benchmark runs every mode the machine supports.
 
-### WSL2 notes
-
-Everything runs on WSL2. For the fullest experience:
-
-* enable systemd (for journald logs): add `[boot]` / `systemd=true` to `/etc/wsl.conf`, then `wsl --shutdown`
-* check PSI support with `cat /proc/pressure/cpu` — if it is missing, PSI metrics show "n/a"
-* only processes inside the WSL VM are visible (Windows processes are not)
-
-### Configuration
+**WSL2.** Everything except eBPF works. Enable systemd for journald (`[boot]` / `systemd=true` in `/etc/wsl.conf`)
+and check PSI with `cat /proc/pressure/cpu`. Only processes inside the WSL VM are visible.
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `KS_COLLECTOR` | `auto` | `procfs` (pure /proc, default on Linux) or `psutil` |
 | `KS_SAMPLE_INTERVAL` | `2` | seconds between samples |
-| `KS_RETENTION_HOURS` | `24` | how long metrics are kept |
+| `KS_RETENTION_HOURS` | `24` | metric retention |
 | `KS_MEM_ALERT_PCT` | `90` | memory alert threshold |
-| `KS_DRY_RUN` | `1` | set to `0` to let the CLI apply resource actions |
-| `KS_DATA_DIR` | `./data` | database, model and action log location |
+| `KS_DRY_RUN` | `1` | set `0` to let `allocate --apply` change processes |
+| `KS_DATA_DIR` | `./data` | database, models, calibration, action log |
 
 ---
 
 ## Live demo
 
-The `workloads/` folder contains small programs that create the situations each module detects:
-
 ```bash
-bash workloads/run_demo.sh 180        # start everything for 3 minutes
+bash workloads/run_demo.sh 180
 ```
 
-| Workload | What to look at |
+| Workload | Shows |
 |---|---|
-| `cpu_hog.py` | Classified **CPU-bound**; Resource Allocation plans a higher nice value and core pinning |
-| `memory_leak.py` | Memory Prediction → **Leak detection** flags it; classifier labels it **Memory-heavy** |
-| `io_heavy.py` | Classified **I/O-bound** (voluntary switches, high disk rate); ionice action planned |
-| `zombie_maker.py` | Process Monitor → **Anomalies** shows zombie children |
-| `lock_deadlock.py` | Deadlock → **Live system** shows a real circular wait in `/proc/locks` |
+| `cpu_hog.py` | CPU-bound classification, nice/affinity/cgroup actions |
+| `memory_leak.py` | Leak detection, memory forecast, OOM victim ranking |
+| `io_heavy.py` | I/O-bound classification, ionice |
+| `zombie_maker.py` | Zombie anomaly |
+| `lock_deadlock.py` | Real circular wait in `/proc/locks` |
+| `latency_probe.py` | Wake-up latency under contention (used by the allocation benchmark) |
 
-Suggested demo flow: Overview → Process Monitor (classes + anomalies) → CPU Scheduling (convoy profile, Compare all,
-Recommendation) → Page Replacement (Belady's anomaly) → Deadlock (textbook Banker's request, dining philosophers,
-live lock deadlock) → Memory Prediction (leak) → Log Analysis (sample source) → Resource Allocation (dry run, apply,
-roll back).
-
----
-
-## Command-line interface
+## CLI
 
 ```bash
-python -m kernelsense status                                   # snapshot, top processes, anomalies
-python -m kernelsense record --interval 2 --duration 600       # record metrics without the dashboard
-python -m kernelsense schedule --profile convoy --goal interactive [--practical]
-python -m kernelsense paging --refs "1 2 3 4 1 2 5 1 2 3 4 5" --frames 3
+python -m kernelsense status                     # collector, capabilities, top processes, anomalies
+python -m kernelsense record --duration 600      # record metrics headless
+python -m kernelsense trace --duration 5         # capture CPU bursts and replay them through the schedulers
+python -m kernelsense schedule --profile convoy --goal interactive --practical
+python -m kernelsense paging --trace matmul_naive --frames 8
 python -m kernelsense bankers --request "P1 1 0 2"
-python -m kernelsense logs --source auto                       # journald | syslog | dmesg | sample
-python -m kernelsense allocate            # plan only (dry run)
-python -m kernelsense allocate --apply    # apply nice / affinity / ionice to your own processes
+python -m kernelsense lockdep                    # lock-order validation demos + seeded-bug benchmark
+python -m kernelsense oom                        # OOM-killer victim ranking
+python -m kernelsense logs --source auto
+python -m kernelsense loghub                     # Drain + anomaly detection on Loghub
+python -m kernelsense allocate [--apply]         # classify workloads, plan nice/affinity/ionice
+python -m kernelsense control --batch-pids 123 456 --interactive-pids 789 --policy q --mode cgroup
+python -m kernelsense export --port 9877         # Prometheus /metrics
 ```
-
----
-
-## Module details
-
-### 1. Process Monitoring
-Reads `/proc/[pid]/stat` (state, minor/major faults), `/proc/[pid]/status` (context switches), `/proc/loadavg` and
-`/proc/pressure/*`. CPU% is computed from CPU-time deltas between samples. Each process is classified from its
-context-switch behaviour: involuntary switches dominate for CPU-bound work (preempted by the scheduler), voluntary
-switches dominate for I/O-bound and interactive work (the process blocks).
-
-### 2. CPU Scheduling Recommendation
-Six policies share one `Scheduler` interface and produce Gantt segments and per-process statistics (waiting,
-turnaround, response) plus throughput, CPU utilisation, context switches and Jain's fairness index. The recommender
-characterises the workload (burst variability, convoy risk, priority spread, share of short jobs), simulates every
-candidate and ranks them for the chosen goal (balanced, interactive, throughput, fairness). "Practical only" excludes
-SJF/SRTF, which need future burst knowledge. Results are verified against textbook examples in the tests.
-
-### 3. Memory Usage Prediction
-Recorded memory history is resampled to a regular grid and four forecasters are compared on a held-out window
-(MAE/RMSE/MAPE and improvement over the naive baseline). The best one produces a forecast with a widening 95%
-interval and an estimate of when the alert threshold will be crossed. Leak detection fits a trend to each process's
-RSS and flags steady (high R²), monotonic growth above a slope threshold.
-
-### 4. Deadlock Prediction
-Banker's safety and resource-request algorithms (with step-by-step trace), resource allocation graphs with
-single-instance cycle detection and multi-instance graph reduction, and a risk score combining unsafe state, resource
-scarcity, hold-and-wait and waiting-chain length to flag states heading toward deadlock. The live tab builds a
-wait-for graph from `/proc/locks`.
-
-### 5. Page Replacement Simulation
-FIFO, LRU, Optimal, LFU and Clock with frame tables (hit/fault per reference, victims, Clock reference bits), fault
-curves across frame counts, Belady's anomaly detection and random search, and a working-set/thrashing view.
-
-### 6. Log Analysis
-Parses RFC 3164 syslog, ISO/journalctl and raw dmesg lines, infers severity, matches OS event rules (OOM kill,
-panic/oops, lockups, hung tasks, segfaults, disk I/O errors, thermal throttling, service/auth failures, memory
-pressure) and detects anomalous time windows with an Isolation Forest plus a robust z-score. A generated sample log
-is available when real logs are not readable.
-
-### 7. Performance Dashboard
-`Overview.py` plus seven pages under `pages/`, sharing one recorder thread. Each page starts with a short explanation
-of the OS concept it demonstrates.
-
-### 8. AI-Based Resource Allocation
-Features describe how a process uses the OS (CPU demand and burstiness, RSS and its growth, switch rates, I/O rate,
-threads). A Random Forest trained on an OS-informed synthetic dataset (5-fold cross-validated) classifies processes;
-the dashboard shows the confusion matrix and feature importances, and the model can be retrained with live processes
-labelled by the rule-based classifier. The policy maps classes and system load to nice, affinity and ionice changes
-(plus advisory SCHED_BATCH / memory-limit suggestions). The actuator refuses system and foreign processes, dry-runs by
-default, logs every action and supports rollback.
-
----
 
 ## Project structure
 
 ```
 kernelsense/
-├── config.py, storage.py, recorder.py, cli.py
-├── monitoring/   procfs.py · collector.py · classify.py · analysis.py
-├── scheduling/   models.py · algorithms.py · burst_predictor.py · workload.py · recommender.py
-├── memory/       forecast.py · leak.py
-├── deadlock/     bankers.py · rag.py · risk.py · live.py
-├── paging/       algorithms.py · analysis.py
-├── logs/         parser.py · events.py · anomaly.py · sources.py
-├── allocator/    features.py · classifier.py · policy.py · actuator.py
-└── ui/           common.py
-Overview.py, pages/       Streamlit dashboard
-workloads/                demo programs
-tests/                    pytest suite
-docs/                     concept notes and screenshots
+├── monitoring/   procfs.py · procfs_collector.py · collector.py · classify.py · analysis.py
+├── scheduling/   algorithms.py · proportional.py (CFS, EEVDF, Stride, Lottery) · trace.py · ml_burst.py
+│                 burst_predictor.py · workload.py · recommender.py · models.py
+├── memory/       forecast.py (incl. quantile GBM) · leak.py (Mann-Kendall) · oom.py
+├── deadlock/     bankers.py · rag.py · risk.py · live.py · lockdep.py · seeded.py
+├── paging/       algorithms.py · advanced.py (ARC, WSClock, Mattson) · traces.py · analysis.py
+├── logs/         parser.py · events.py · anomaly.py · drain.py · sequence.py · correlate.py · loghub.py
+├── allocator/    features.py · classifier.py · policy.py · actuator.py · cgroup.py · env.py · learning.py
+│                 controller.py
+├── bench/        experiments.py · report.py
+├── exporter.py · ebpf.py · recorder.py · storage.py · cli.py
+Overview.py, pages/      Streamlit dashboard
+benchmarks/              run_all.py, results/*.json, RESULTS.md
+grafana/                 dashboard + Prometheus config
+workloads/               demo and benchmark programs
+tests/                   pytest + hypothesis
+docs/                    OS concept notes, screenshots
 ```
-
-## Tests
-
-```bash
-python -m pytest -q
-```
-
-The suite checks textbook results (e.g. FCFS/SJF/RR waiting times, SRTF 6.5, FIFO/LRU/OPT 15/12/9 faults, the
-Banker's safe sequence ⟨P1, P3, P4, P0, P2⟩), algorithm invariants, detection logic and actuator safety rules.
-CI runs it on every push.
 
 ## Limitations
 
-* The workload classifier is trained on synthetic data; its cross-validated accuracy measures separability of the
-  generated classes, not accuracy on real workloads.
-* Burst lengths for "live processes" in the scheduler are estimates — the OS does not expose future CPU bursts.
-* Lowering a nice value (and rolling back a nice increase) requires root.
+* **Contention model.** The simulator models one CPU and a single preemption parameter fitted on the target
+  machine. Learned policies should be re-calibrated (`benchmarks/run_all.py policy_learning`) on a different
+  kernel or CPU count.
+* **Static baseline.** In the allocation benchmark, a static nice 19 policy also performs well because no other
+  services compete. The learned policy's advantage is that it keeps batch throughput in scenarios with competing
+  services (see the simulator evaluation).
+* **cgroup v1.** Under cgroup v1, `cpu.shares` acts on the group as a whole and reduced latency less than per-process
+  nice (−44% vs −93%). cgroup v2 `cpu.weight` is preferred.
+* **Synthetic training data.** The workload classifier's training set is synthetic, so its accuracy measures class
+  separability, not real-world accuracy.
+* **Loghub sample size.** The 2k-line Loghub samples are small. The n-gram model reaches recall 1.0 on BGL but low
+  precision because only a few normal windows are available for training.
+* **eBPF.** Requires `bpftrace` and root, and is optional.
 
 See [docs/os-concepts.md](docs/os-concepts.md) for the theory behind each module.
