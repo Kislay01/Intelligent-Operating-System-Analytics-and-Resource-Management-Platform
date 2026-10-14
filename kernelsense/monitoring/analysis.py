@@ -21,6 +21,16 @@ KNOWN_INIT_CHILDREN = {
 }
 
 
+def _is_system_account(username: str) -> bool:
+    """Service accounts (UID < 1000 on Linux) run daemons that are normally children of init."""
+    try:
+        import pwd
+
+        return pwd.getpwnam(username).pw_uid < 1000
+    except (KeyError, ImportError):
+        return username in ("root", "?")
+
+
 @dataclass
 class Anomaly:
     pid: int
@@ -109,7 +119,7 @@ def detect_anomalies(
         if p.state == "D":
             out.append(Anomaly(p.pid, p.name, "Uninterruptible sleep", "warning",
                                "Blocked in the kernel (usually I/O). Long D-state can indicate a hung task."))
-        if p.ppid == 1 and p.name not in KNOWN_INIT_CHILDREN and p.username not in ("root", "?"):
+        if p.ppid == 1 and p.name not in KNOWN_INIT_CHILDREN and not _is_system_account(p.username):
             out.append(Anomaly(p.pid, p.name, "Orphan process", "info",
                                "Re-parented to init (PID 1); its original parent exited."))
         # kthreadd (PID 2) is the parent of every kernel thread by design.
