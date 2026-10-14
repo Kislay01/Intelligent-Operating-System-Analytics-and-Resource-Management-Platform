@@ -5,6 +5,10 @@ from __future__ import annotations
 import psutil
 
 from .actuator import ActionResult, Actuator
+from .cgroup import Cgroup, CgroupInfo, detect as detect_cgroups
+from .controller import ClosedLoopController, ControllerConfig, Decision
+from .env import ACTIONS, Scenario, simulate
+from .learning import LinUCB, QLearner, evaluate as evaluate_policies, train as train_policies
 from .classifier import LABELS, TrainingReport, WorkloadClassifier, synthetic_dataset
 from .features import FEATURES, from_history, from_snapshot
 from .policy import Action, PolicyConfig, SystemState, plan
@@ -34,6 +38,8 @@ def recommend(features, system: SystemState, classifier: WorkloadClassifier | No
 
 
 __all__ = [
+    "ACTIONS", "Cgroup", "CgroupInfo", "ClosedLoopController", "ControllerConfig", "Decision", "LinUCB", "QLearner",
+    "Scenario", "detect_cgroups", "evaluate_policies", "simulate", "train_policies",
     "Action", "ActionResult", "Actuator", "FEATURES", "LABELS", "PolicyConfig", "SystemState", "TrainingReport",
     "WorkloadClassifier", "current_settings", "from_history", "from_snapshot", "plan", "recommend",
     "synthetic_dataset",
