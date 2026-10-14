@@ -63,6 +63,17 @@ class ProcessStats:
         return self.start - self.arrival
 
 
+def _percentile(values: list[float], q: float) -> float:
+    """Linear-interpolated percentile (same as numpy's default)."""
+    if not values:
+        return 0.0
+    v = sorted(values)
+    k = (len(v) - 1) * q / 100
+    lo = int(k)
+    hi = min(lo + 1, len(v) - 1)
+    return v[lo] + (v[hi] - v[lo]) * (k - lo)
+
+
 @dataclass
 class ScheduleResult:
     algorithm: str
@@ -96,6 +107,8 @@ class ScheduleResult:
             "avg_turnaround": round(sum(tat) / n, 2),
             "avg_response": round(sum(rt) / n, 2),
             "max_waiting": max(wt, default=0),
+            "p95_response": round(_percentile(rt, 95), 2),
+            "p99_turnaround": round(_percentile(tat, 99), 2),
             "throughput": round(len(self.stats) / effective_span, 4),
             "cpu_utilization": round(100 * self.busy_time / effective_span, 2),
             "context_switches": self.context_switches,

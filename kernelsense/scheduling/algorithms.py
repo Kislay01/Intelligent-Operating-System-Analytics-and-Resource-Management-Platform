@@ -348,8 +348,8 @@ class MLFQ(Scheduler):
         return ScheduleResult(self.name, tl.segments, _build_stats(jobs, first, done), tl.switches, self.params())
 
 
-def default_schedulers(quantum: int = 4) -> list[Scheduler]:
-    return [
+def default_schedulers(quantum: int = 4, include_proportional: bool = True) -> list[Scheduler]:
+    base: list[Scheduler] = [
         FCFS(),
         SJF(),
         SRTF(),
@@ -358,6 +358,11 @@ def default_schedulers(quantum: int = 4) -> list[Scheduler]:
         PriorityScheduler(preemptive=True, aging_interval=10),
         MLFQ((quantum, quantum * 2)),
     ]
+    if include_proportional:
+        from .proportional import CFS, EEVDF, Lottery, Stride  # local import avoids a cycle
+
+        base += [CFS(), EEVDF(), Stride(), Lottery()]
+    return base
 
 
 def compare(jobs: list[Job], schedulers: list[Scheduler] | None = None) -> list[ScheduleResult]:

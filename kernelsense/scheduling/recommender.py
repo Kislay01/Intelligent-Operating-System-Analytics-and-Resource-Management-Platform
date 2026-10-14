@@ -17,6 +17,7 @@ import pandas as pd
 
 from .algorithms import MLFQ, SJF, SRTF, FCFS, PriorityScheduler, RoundRobin, Scheduler
 from .models import Job, ScheduleResult
+from .proportional import CFS, EEVDF, Stride
 
 GOALS = {
     "balanced": "Balance waiting time, response time and fairness",
@@ -124,6 +125,10 @@ def _linux_hint(best: str) -> str:
         return "Closest Linux equivalent: SCHED_RR for real-time tasks; CFS already time-slices normal tasks fairly."
     if best.startswith("Priority"):
         return "Map priorities to nice values (-20..19) or SCHED_FIFO/SCHED_RR real-time priorities."
+    if best.startswith("CFS") or best.startswith("EEVDF"):
+        return "This is the default Linux policy (SCHED_OTHER): tune it with nice values or cgroup cpu.weight."
+    if best.startswith("Stride") or best.startswith("Lottery"):
+        return "Proportional share maps to cgroup v2 cpu.weight (or nice values) on Linux."
     if best.startswith("MLFQ"):
         return "CFS/EEVDF achieve MLFQ-like behaviour: tasks that sleep often get favoured when they wake."
     return "FCFS resembles SCHED_FIFO among equal-priority real-time tasks."
@@ -139,6 +144,9 @@ def candidates(jobs: list[Job], quantum: int, practical_only: bool = False) -> l
         PriorityScheduler(preemptive=False),
         PriorityScheduler(preemptive=True, aging_interval=max(5, quantum * 2)),
         MLFQ((quantum, quantum * 2), boost_period=max(30, quantum * 10)),
+        CFS(sched_latency=max(2, quantum * 2)),
+        EEVDF(base_slice=quantum),
+        Stride(),
     ]
 
 
