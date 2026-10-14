@@ -6,6 +6,8 @@ plateauing. We fit a linear trend to RSS over time and flag a process when:
 * the slope is above ``min_slope_mb_per_min``
 * the trend explains most of the variation (R^2 >= ``min_r2``)
 * most consecutive samples are non-decreasing (``min_monotonic``)
+* growth is sustained (positive slope in both halves of the window, which
+  rejects one-off step changes)
 * the Mann-Kendall test confirms a statistically significant upward trend
   (non-parametric, so it is robust to garbage-collection sawtooth patterns
   and outliers that break the linear fit)
@@ -95,8 +97,13 @@ def detect_leaks(
         slope, r2, mono = analyze_series(ts, rss)
         _, mk_z, mk_p = mann_kendall(rss)
         significant = mk_z > 0 and mk_p <= max_p_value
+        # Reject one-off step changes (e.g. a cache warming up): a leak keeps growing in both halves.
+        half = len(rss) // 2
+        s1, _, _ = analyze_series(ts[:half], rss[:half])
+        s2, _, _ = analyze_series(ts[half:], rss[half:])
+        sustained = min(s1, s2) >= 0.25 * min_slope_mb_per_min
         # A steady linear fit OR a significant monotonic trend (robust to GC sawtooth) qualifies.
-        suspected = slope >= min_slope_mb_per_min and significant and (
+        suspected = slope >= min_slope_mb_per_min and significant and sustained and (
             (r2 >= min_r2 and mono >= min_monotonic) or mk_z >= 4)
         findings.append(
             LeakFinding(
