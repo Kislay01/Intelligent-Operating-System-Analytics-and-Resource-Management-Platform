@@ -58,7 +58,9 @@ if name == "sample":
     st.caption("Using the generated sample log (realistic syslog with injected incidents) because no real source "
                "was selected or readable.")
 
-tab_time, tab_events, tab_sources, tab_raw = st.tabs(["Timeline & anomalies", "OS events", "Sources", "Log viewer"])
+tab_time, tab_events, tab_sources, tab_raw, tab_drain, tab_corr, tab_loghub = st.tabs(
+    ["Timeline & anomalies", "OS events", "Sources", "Log viewer", "Templates (Drain)", "Incident correlation",
+     "Loghub benchmark"])
 
 with tab_time:
     if anoms.empty:
@@ -139,3 +141,74 @@ with tab_raw:
         view = view[view["message"].str.contains(q, case=False, regex=True, na=False)]
     st.dataframe(view[["timestamp", "host", "source", "pid", "severity", "message"]].tail(2000),
                  hide_index=True, width="stretch", height=480)
+
+with tab_drain:
+    st.markdown("**Drain** recovers the print statements behind log lines in one pass: lines descend a fixed-depth "
+                "parse tree (length → first tokens) and join the most similar group; differing tokens become `<*>`.")
+    sim = st.slider("Similarity threshold", 0.3, 0.9, 0.5, 0.05)
+    drain = logs.Drain(sim_threshold=sim)
+    ids = drain.fit(df["message"].astype(str).tolist())
+    tpl = drain.templates()
+    c = st.columns(3)
+    c[0].metric("Lines", f"{len(df):,}")
+    c[1].metric("Templates", len(tpl))
+    c[2].metric("Compression", f"{len(df) / max(len(tpl), 1):.0f}x")
+    st.dataframe(tpl, hide_index=True, width="stretch", height=380)
+    seq = pd.Series(drain.final_assignments())
+    if len(seq) > 50:
+        split = int(len(seq) * 0.6)
+        model = logs.NGramSequenceModel(history=3, top_k=5).fit([seq[:split].tolist()])
+        flags = model.anomalies(seq[split:].tolist())
+        st.markdown(f"**Sequence model (DeepLog rule)** trained on the first 60% of lines: "
+                    f"{sum(flags)} of {len(flags)} later lines were not among the top-5 predicted next templates.")
+        odd = df.iloc[split:][pd.Series(flags, index=df.index[split:])]
+        st.dataframe(odd[["timestamp", "source", "message"]].head(50), hide_index=True, width="stretch")
+
+with tab_corr:
+    st.markdown("Joins **what the system said** (OS events in the logs) with **what the metrics did** (robust-z jumps "
+                "in recorded CPU, memory, swap and load) to build an incident timeline.")
+    hist = get_recorder().store.system_history(24 * 60)
+    if hist.empty:
+        st.info("No recorded metrics yet.")
+    else:
+        res = logs.incident_timeline(hist, df)
+        c = st.columns(3)
+        c[0].metric("OS events", res["total_events"])
+        c[1].metric("Metric anomalies", len(res["metric_anomalies"]))
+        c[2].metric("Events explained by metrics", res["explained"])
+        corr = res["correlated"]
+        if corr.empty:
+            st.success("No OS events to correlate.")
+        else:
+            st.dataframe(corr[["timestamp", "category", "related_metrics", "narrative"]], hide_index=True,
+                         width="stretch")
+        if not res["metric_anomalies"].empty:
+            st.dataframe(res["metric_anomalies"].tail(50), hide_index=True, width="stretch")
+        st.caption("Tip: run `python workloads/memory_leak.py` until memory pressure appears, then pick the journald "
+                   "or dmesg source to see an OOM kill matched to the memory spike.")
+
+with tab_loghub:
+    import json
+    from pathlib import Path
+
+    st.markdown("Evaluation on the public **Loghub** 2k-line samples (BGL supercomputer, HDFS, Linux), which ship with "
+                "ground-truth templates and, for BGL, alert labels.")
+    saved = Path(__file__).resolve().parent.parent / "benchmarks" / "results" / "loghub.json"
+    result = json.loads(saved.read_text()) if saved.exists() else None
+    if st.button("Run evaluation now (downloads ~1 MB from GitHub)"):
+        from kernelsense.logs import loghub
+        with st.spinner("Parsing and evaluating..."):
+            try:
+                result = loghub.run_all()
+            except OSError as exc:
+                st.error(f"Download failed: {exc}")
+    if result and "parsing" in result:
+        st.markdown("**Drain grouping accuracy**")
+        st.dataframe(pd.DataFrame([{"dataset": k, **v} for k, v in result["parsing"].items()]), hide_index=True,
+                     width="stretch")
+        b = result["bgl_anomaly"]
+        st.markdown(f"**BGL anomaly detection** - {b['test_windows']} test windows of {b['window_lines']} lines "
+                    f"({b['test_anomalous']} contain alerts)")
+        st.dataframe(pd.DataFrame([{"method": "n-gram sequence (DeepLog rule)", **b["ngram_deeplog"]},
+                                   {"method": "Isolation Forest", **b["isolation_forest"]}]), hide_index=True,
+                     width="stretch")

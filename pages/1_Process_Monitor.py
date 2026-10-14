@@ -5,7 +5,7 @@ import streamlit as st
 from kernelsense.monitoring import detect_anomalies, render_tree, to_frame
 from kernelsense.monitoring.analysis import tree_edges
 from kernelsense.monitoring.classify import CLASSES
-from kernelsense.monitoring.procfs import STATE_NAMES, read_status
+from kernelsense.monitoring.procfs import STATE_NAMES, read_oom_score, read_smaps_rollup, read_status
 from kernelsense.ui.common import (
     INK, SERIES, SEVERITY_ICON, concept, get_recorder, line_chart, page_setup, show, sidebar_status, style,
 )
@@ -114,6 +114,17 @@ with tab_detail:
         else:
             st.info("History appears once the recorder has stored a few samples for this process "
                     "(only the busiest processes are stored).")
+        sm = read_smaps_rollup(int(pid))
+        oom = read_oom_score(int(pid))
+        if sm or oom:
+            m = st.columns(4)
+            if sm:
+                m[0].metric("RSS", f"{sm['rss_kb'] / 1024:.1f} MB", help="Resident set size")
+                m[1].metric("PSS", f"{sm['pss_kb'] / 1024:.1f} MB", help="Proportional set size: shared pages divided "
+                                                                          "among the processes sharing them")
+                m[2].metric("USS", f"{sm['uss_kb'] / 1024:.1f} MB", help="Unique set size: memory freed if it exits")
+            if oom:
+                m[3].metric("oom_score", oom[0], help=f"oom_score_adj = {oom[1]}; higher is killed first")
         status = read_status(int(pid))
         if status:
             keys = ["State", "PPid", "Threads", "VmPeak", "VmSize", "VmRSS", "VmSwap", "voluntary_ctxt_switches",

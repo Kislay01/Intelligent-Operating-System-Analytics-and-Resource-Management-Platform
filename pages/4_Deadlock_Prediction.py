@@ -39,7 +39,8 @@ def matrix_df(mat, rows, cols):
     return pd.DataFrame(mat, index=rows, columns=cols)
 
 
-tab_bank, tab_rag, tab_live = st.tabs(["Banker's algorithm (avoidance)", "Resource allocation graph (detection)",
+tab_bank, tab_rag, tab_live, tab_lockdep = st.tabs(["Banker's algorithm (avoidance)", "Resource allocation graph (detection)",
+                                                    "Lock-order validation (lockdep)",
                                        "Live system"])
 
 # --------------------------------------------------------------- Banker's
@@ -216,3 +217,60 @@ with tab_live:
     if rep["d_state"]:
         st.warning("Processes in uninterruptible sleep: " + ", ".join(f"{d['name']} ({d['pid']})" for d in rep["d_state"]))
     st.caption("Source: /proc/locks (lines with '->' are waiters blocked on the lock above them) and process states.")
+
+with tab_lockdep:
+    from kernelsense.deadlock.lockdep import demo_dining_philosophers, demo_inversion
+    from kernelsense.deadlock.seeded import benchmark
+
+    st.markdown("Inspired by the Linux kernel's **lockdep**: every time a thread takes lock B while holding A, the edge "
+                "A → B is added to a global lock-order graph. If a new edge would close a cycle, a deadlock is "
+                "*possible* - reported even though this run did not hang.")
+    demo = st.radio("Demo", ["Inverted lock order", "Dining philosophers", "Dining philosophers with resource ordering"],
+                    horizontal=True)
+    mon = {"Inverted lock order": demo_inversion,
+           "Dining philosophers": demo_dining_philosophers,
+           "Dining philosophers with resource ordering": lambda: demo_dining_philosophers(ordered=True)}[demo]()
+    rep = mon.report()
+    a, b = st.columns([3, 2])
+    with a:
+        G = mon.graph
+        pos = nx.circular_layout(G)
+        cyc_nodes = {n for v in mon.violations for n in v.cycle}
+        fig = go.Figure()
+        for u, v in G.edges():
+            fig.add_annotation(x=pos[v][0], y=pos[v][1], ax=pos[u][0], ay=pos[u][1], xref="x", yref="y", axref="x",
+                               ayref="y", showarrow=True, arrowhead=3, arrowsize=1.4, arrowwidth=2,
+                               arrowcolor=SERIES[1] if (u in cyc_nodes and v in cyc_nodes) else SERIES[0],
+                               standoff=20, startstandoff=20)
+        nodes = list(G.nodes())
+        fig.add_trace(go.Scatter(x=[pos[n][0] for n in nodes], y=[pos[n][1] for n in nodes], mode="markers+text",
+                                 text=nodes, marker=dict(size=46, symbol="square",
+                                                         color=[STATUS["critical"] if n in cyc_nodes else "#cde2fb"
+                                                                for n in nodes], line=dict(color=INK["axis"], width=2)),
+                                 textfont=dict(size=10, color=INK["primary"]), hovertemplate="%{text}<extra></extra>"))
+        fig.update_xaxes(visible=False)
+        fig.update_yaxes(visible=False, scaleanchor="x")
+        show(style(fig, 400, "Lock-order graph (edge A→B: B acquired while holding A)"), "lockgraph")
+    with b:
+        st.metric("Lock acquisitions", rep["acquisitions"])
+        st.metric("Potential deadlocks", rep["violations"])
+        for d in rep["details"]:
+            st.error(d)
+        if not rep["details"]:
+            st.success("Consistent global lock order - no deadlock possible.")
+    st.markdown("#### Seeded-bug benchmark")
+    n = st.slider("Programs (half contain a lock-order inversion)", 20, 300, 100, 20)
+    if st.button("Run benchmark"):
+        with st.spinner("Running generated programs..."):
+            r = benchmark(n)
+        c = st.columns(3)
+        c[0].metric("lockdep detection rate", f"{r['lockdep_detection_rate']:.0%}")
+        c[1].metric("False positives", f"{r['lockdep_false_positive_rate']:.0%}")
+        c[2].metric("Bugs that actually deadlocked in testing", f"{r['observed_deadlock_rate_buggy']:.0%}")
+        st.caption("Short critical sections almost never hit the bad interleaving in testing, so ordinary testing "
+                   "misses these bugs; lock-order validation finds all of them without needing the deadlock to happen.")
+    st.code("""from kernelsense.deadlock import LockOrderMonitor, patch_threading
+mon = LockOrderMonitor()
+with patch_threading(mon):      # threading.Lock()/RLock() become tracked locks
+    run_your_program()
+print(mon.report())""", language="python")

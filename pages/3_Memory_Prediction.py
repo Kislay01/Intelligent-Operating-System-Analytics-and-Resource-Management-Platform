@@ -37,6 +37,11 @@ def forecast_chart(series: pd.Series, fc, title: str, y_title: str, threshold: f
     return style(fig, 380, title)
 
 
+@st.cache_data(show_spinner=False, ttl=30)
+def cached_eval(values: tuple) -> pd.DataFrame:
+    return evaluate(np.array(values))
+
+
 def demo_series(n: int = 240, interval: float = 2.0) -> pd.Series:
     rng = np.random.default_rng(3)
     base = 45 + 0.06 * np.arange(n) + 2 * np.sin(np.arange(n) / 15) + rng.normal(0, 0.6, n)
@@ -44,7 +49,8 @@ def demo_series(n: int = 240, interval: float = 2.0) -> pd.Series:
     return pd.Series(base, index=idx)
 
 
-tab_sys, tab_leak, tab_proc = st.tabs(["System memory forecast", "Leak detection", "Process forecast"])
+tab_sys, tab_leak, tab_proc, tab_oom = st.tabs(["System memory forecast", "Leak detection", "Process forecast",
+                                               "OOM victim prediction"])
 
 with tab_sys:
     s, _ = rec.snapshot()
@@ -75,7 +81,7 @@ with tab_sys:
         series = regularize(hist, "mem_percent", interval)
 
     steps = max(1, int(horizon_min * 60 / interval))
-    table = evaluate(series.values)
+    table = cached_eval(tuple(np.round(series.values, 4)))
     best_name = table.dropna(subset=["MAE"]).iloc[0]["model"]
     model = next(m for m in default_models() if m.name == best_name).fit(series.values)
     fc = model.predict(steps)
@@ -141,9 +147,36 @@ with tab_proc:
             d = ph[ph["pid"] == pid]
             series = regularize(d, "rss_mb", rec.interval)
             h = st.slider("Horizon (min)", 1, 60, 10, key="ph")
-            table = evaluate(series.values)
+            table = cached_eval(tuple(np.round(series.values, 4)))
             best = table.dropna(subset=["MAE"]).iloc[0]["model"]
             m = next(x for x in default_models() if x.name == best).fit(series.values)
             fc = m.predict(max(1, int(h * 60 / rec.interval)))
             show(forecast_chart(series, fc, f"RSS forecast - {names[pid]} ({pid})", "MB", None, rec.interval), "pfc")
             st.dataframe(table.round(3), hide_index=True, width="stretch")
+
+with tab_oom:
+    from kernelsense.memory import oom
+
+    st.markdown("When RAM and swap run out, the kernel kills the process with the highest **badness**. "
+                "`/proc/[pid]/oom_score` = (1000 + badness × 1000 / totalpages) × 2/3, where badness = RSS + swap + "
+                "page tables (+ oom_score_adj). The estimate column recomputes it from `/proc/[pid]/status`.")
+    cands = oom.frame(15)
+    if cands.empty:
+        st.info("OOM scores are not available on this system.")
+    else:
+        match = (abs(cands["oom_score"] - cands["estimated_score"]) <= 1).mean()
+        hist = rec.store.system_history(60)
+        eta = None
+        if len(hist) >= 30:
+            ser = regularize(hist, "mem_percent", rec.interval)
+            m = default_models(include_ml=False)[3].fit(ser.values)
+            eta = time_to_threshold(m.predict(int(3600 / rec.interval)), 99.0, rec.interval)
+        pred = oom.prediction(eta)
+        (st.error if eta else st.info)(pred["message"])
+        st.metric("Estimate matches kernel oom_score (±1)", f"{match:.0%}")
+        st.dataframe(cands, hide_index=True, width="stretch")
+        fig = go.Figure(go.Bar(x=cands["oom_score"], y=[f"{n} ({p})" for n, p in zip(cands["name"], cands["pid"])],
+                               orientation="h", marker=dict(color=SERIES[0], cornerradius=4),
+                               hovertemplate="%{y}: %{x}<extra></extra>"))
+        fig.update_yaxes(autorange="reversed")
+        show(style(fig, 60 + 26 * len(cands), "OOM-killer ranking (highest is killed first)"), "oomrank")

@@ -19,9 +19,17 @@ concept(
 )
 
 c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-mode = c1.radio("Reference string", ["Generate", "Custom"], horizontal=True)
-frames = c2.number_input("Frames", 1, 12, 3)
-if mode == "Generate":
+mode = c1.radio("Reference string", ["Generate", "Custom", "Algorithmic trace"], horizontal=True)
+frames = c2.number_input("Frames", 1, 64, 3 if mode != "Algorithmic trace" else 8)
+if mode == "Algorithmic trace":
+    from kernelsense.paging import traces
+
+    tname = c3.selectbox("Program", list(traces.ALGORITHMIC), format_func=lambda k: traces.ALGORITHMIC[k][0])
+    limit = c4.number_input("Max references", 100, 20000, 5000, 500)
+    refs = traces.algorithmic(tname, int(limit))
+    st.caption(f"{traces.ALGORITHMIC[tname][0]}: pages computed from array element addresses (8-byte elements, "
+               f"4 KiB pages) · {len(refs)} references over {len(set(refs))} distinct pages.")
+elif mode == "Generate":
     pattern = c3.selectbox("Pattern", list(PATTERNS), format_func=lambda p: p, index=0)
     length = c4.number_input("Length", 5, 200, 20)
     refs = generate(pattern, int(length), 10, seed=7)
@@ -33,12 +41,13 @@ else:
     except ValueError as e:
         st.error(str(e))
         st.stop()
-st.code(" ".join(map(str, refs)), language=None)
+st.code(" ".join(map(str, refs[:400])) + (" ..." if len(refs) > 400 else ""), language=None)
 
-tab_step, tab_cmp, tab_curve, tab_belady, tab_ws = st.tabs(
-    ["Step-by-step", "Comparison", "Faults vs frames", "Belady's anomaly", "Working set & thrashing"])
+tab_step, tab_cmp, tab_curve, tab_belady, tab_ws, tab_mattson = st.tabs(
+    ["Step-by-step", "Comparison", "Faults vs frames", "Belady's anomaly", "Working set & thrashing",
+     "Miss-ratio curve (Mattson)"])
 
-results = {r.algorithm: r for r in compare(refs, int(frames))}
+results = {k: cls().simulate(refs, int(frames)) for k, cls in ALL_POLICIES.items()}
 
 with tab_step:
     algo = st.radio("Algorithm", list(ALL_POLICIES), horizontal=True)
@@ -48,7 +57,12 @@ with tab_step:
     c[1].metric("Hits", r.hits)
     c[2].metric("Fault rate", f"{r.fault_rate:.1%}")
     c[3].metric("Hit ratio", f"{1 - r.fault_rate:.1%}")
-    table = r.table()
+    if len(refs) > 80:
+        st.caption("Showing the first 80 references; metrics above cover the full trace.")
+        r_show = ALL_POLICIES[algo]().simulate(refs[:80], int(frames))
+    else:
+        r_show = r
+    table = r_show.table()
 
     def color_result(v):
         if v == "F":
@@ -63,7 +77,7 @@ with tab_step:
                            "frames": " | ".join("-" if f is None else str(f) for f in s.frames),
                            **({"ref bits": s.extra.get("bits"), "hand": s.extra.get("hand")} if algo == "Clock" else {}),
                            **({"frequency": s.extra.get("freq")} if algo == "LFU" else {})}
-                          for s in r.steps])
+                          for s in r_show.steps])
     with st.expander("Victim selection log"):
         st.dataframe(steps, hide_index=True, width="stretch")
 
@@ -80,7 +94,7 @@ with tab_cmp:
     st.dataframe(summ, hide_index=True, width="stretch")
 
 with tab_curve:
-    maxf = st.slider("Max frames", 2, 15, 8)
+    maxf = st.slider("Max frames", 2, 40, 8)
     curve = fault_curve(refs, maxf)
     fig = go.Figure()
     for i, name in enumerate(ALL_POLICIES):
@@ -144,3 +158,19 @@ with tab_ws:
     c[1].metric("Peak working set", t["peak_working_set"])
     c[2].metric("Thrashing risk", t["thrashing_risk"])
     st.caption(t["explanation"])
+
+with tab_mattson:
+    from kernelsense.paging import mattson_lru_curve, reuse_distance_histogram
+
+    st.markdown("**Mattson's stack algorithm**: LRU is a stack algorithm, so a reference with stack (reuse) distance "
+                "*d* hits exactly when memory has ≥ *d* frames. One pass over the trace gives the LRU fault count for "
+                "**every** memory size - the miss-ratio curve OS designers use to size caches.")
+    maxc = st.slider("Frame sizes", 2, 64, 32, key="mattson_max")
+    curve = mattson_lru_curve(refs, maxc)
+    fig = go.Figure(go.Scatter(x=curve["frames"], y=curve["miss_ratio"], mode="lines+markers",
+                               line=dict(color=SERIES[0], width=2), marker=dict(size=7),
+                               hovertemplate="%{x} frames: %{y:.1%} misses<extra></extra>"))
+    fig.update_layout(xaxis_title="frames", yaxis=dict(title="LRU miss ratio", tickformat=".0%"))
+    show(style(fig, 340, "LRU miss-ratio curve from one pass"), "mrc")
+    hist = reuse_distance_histogram(refs)
+    st.dataframe(hist.head(20), hide_index=True, width="stretch")

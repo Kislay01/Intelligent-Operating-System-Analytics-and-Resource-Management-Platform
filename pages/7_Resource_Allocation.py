@@ -38,7 +38,8 @@ with st.sidebar:
 cfg = PolicyConfig(batch_nice=batch_nice, io_bound_ionice_level=io_level, cpu_busy_pct=cpu_busy,
                    min_confidence=min_conf)
 
-tab_live, tab_model, tab_log = st.tabs(["Classify & allocate", "Model", "Action log"])
+tab_live, tab_model, tab_log, tab_rl, tab_loop = st.tabs(
+    ["Classify & allocate", "Model", "Action log", "Policy learning (RL)", "Closed-loop control & cgroups"])
 
 with tab_live:
     s, procs = rec.snapshot()
@@ -165,3 +166,73 @@ with tab_log:
         ldf[["previous", "target"]] = ldf[["previous", "target"]].astype(str)
         st.dataframe(ldf[["time", "status", "pid", "name", "kind", "previous", "target", "message"]].iloc[::-1],
                      hide_index=True, width="stretch")
+
+with tab_rl:
+    from kernelsense.allocator import env as sim_env
+    from kernelsense.allocator.learning import evaluate as eval_policies, train as train_policies
+
+    sim_env.load_calibration()
+    st.markdown("Policies are trained in a **tick-based CFS contention simulator**: one latency-sensitive task, batch "
+                "hogs whose nice value the agent controls, and other services it must not touch. Reward = batch "
+                "throughput relative to its fair share minus a penalty when the interactive task misses its latency "
+                f"SLO. The simulator's wake-up preemption is calibrated on this machine (ratio {sim_env.PREEMPT_RATIO}).")
+
+    @st.cache_resource(show_spinner="Training LinUCB and Q-learning in the simulator...")
+    def trained(episodes: int):
+        bandit, q, hist = train_policies(episodes)
+        return bandit, q, hist, eval_policies(bandit, q, 200)
+
+    episodes = st.select_slider("Training episodes", [500, 1000, 2000, 3000], 2000)
+    bandit, q, hist, table = trained(episodes)
+    st.dataframe(table, hide_index=True, width="stretch")
+    curve = hist.rolling(100).mean().dropna()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=curve["episode"], y=curve["q_reward"], name="Q-learning", line=dict(color=SERIES[0], width=2)))
+    fig.add_trace(go.Scatter(x=curve["episode"], y=curve["bandit_reward"], name="LinUCB", line=dict(color=SERIES[1], width=2)))
+    fig.update_layout(xaxis_title="episode", yaxis_title="reward (100-episode mean)", hovermode="x unified")
+    show(style(fig, 300, "Learning curves"), "rlcurve")
+    st.markdown("**Learned Q-table** (best batch nice per workload state)")
+    st.dataframe(q.policy_table(), hide_index=True, width="stretch")
+    if st.button("Save Q-policy for the controller"):
+        from kernelsense.config import settings
+        st.success(f"Saved to {q.save(settings.data_dir / 'q_policy.json')}")
+
+with tab_loop:
+    from kernelsense.allocator.cgroup import detect as detect_cg
+    from kernelsense.allocator.controller import ClosedLoopController, ControllerConfig
+
+    info = detect_cg()
+    c = st.columns(3)
+    c[0].metric("cgroup version", f"v{info.version}" if info else "none")
+    c[1].metric("Writable", "yes" if info and info.writable else "no")
+    c[2].metric("Controllers", ", ".join(info.controllers) if info else "-")
+    st.markdown("The controller runs **observe → decide → act → measure**: it reads per-CPU contention from /proc, picks "
+                "a nice level for the selected batch processes from the learned policy, applies it via `nice` or a "
+                "cgroup's CPU weight, and rolls back if CPU pressure (PSI) gets worse.")
+    _, procs = rec.snapshot()
+    choices = sorted([p for p in procs if p.cpu_percent > 5], key=lambda p: -p.cpu_percent)
+    label = {p.pid: f"{p.pid} - {p.name} ({p.cpu_percent:.0f}% CPU)" for p in procs}
+    batch = st.multiselect("Batch processes to manage", [p.pid for p in choices], format_func=lambda x: label.get(x, x))
+    inter = st.multiselect("Latency-sensitive processes", [p.pid for p in procs if p.pid not in batch],
+                           format_func=lambda x: label.get(x, x))
+    c1, c2, c3 = st.columns(3)
+    pol = c1.selectbox("Policy", ["q", "bandit", "rule", "none"])
+    mode = c2.selectbox("Actuation", ["nice", "cgroup"], disabled=not (info and info.writable))
+    steps = c3.number_input("Control steps (1 s each)", 1, 30, 5)
+    confirm = st.checkbox("I understand this changes the priority of the selected processes (restored afterwards)")
+    if st.button("Run controller", type="primary", disabled=not (batch and confirm)):
+        try:
+            ctl = ClosedLoopController(batch, inter, ControllerConfig(policy=pol, mode=mode, interval=1.0))
+            rows = []
+            with st.spinner("Controlling..."):
+                for _ in range(int(steps)):
+                    d = ctl.step()
+                    rows.append({"state": str(d.state), "nice": d.nice, "applied": d.applied,
+                                 "psi_before": d.psi_before, "psi_after": d.psi_after, "rolled_back": d.rolled_back,
+                                 "note": d.note})
+            ctl.close()
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+            st.success("Done - settings restored.")
+        except (RuntimeError, OSError) as exc:
+            st.error(str(exc))
+    st.caption("Measured effect on this machine is reported on the Benchmarks page (`python benchmarks/run_all.py allocation`).")
