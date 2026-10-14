@@ -77,6 +77,10 @@ def read_stat(pid: int) -> dict | None:
             "priority": int(fields[15]),
             "nice": int(fields[16]),
             "num_threads": int(fields[17]),
+            "starttime_ticks": int(fields[19]),
+            "vsize": int(fields[20]),
+            "rss_pages": int(fields[21]),
+            "processor": int(fields[36]) if len(fields) > 36 else -1,
         }
     except (ValueError, IndexError):
         return None
@@ -136,6 +140,98 @@ def pressure_snapshot() -> dict[str, dict | None]:
     return {res: read_pressure(res) for res in ("cpu", "memory", "io")}
 
 
+def read_smaps_rollup(pid: int) -> dict[str, int] | None:
+    """RSS / PSS / USS (kB) from /proc/[pid]/smaps_rollup.
+
+    PSS divides shared pages among the processes sharing them; USS (private
+    clean + private dirty) is the memory freed if the process exits.
+    """
+    try:
+        text = (PROC / str(pid) / "smaps_rollup").read_text()
+    except OSError:
+        return None
+    vals: dict[str, int] = {}
+    for line in text.splitlines()[1:]:
+        key, _, rest = line.partition(":")
+        parts = rest.split()
+        if parts and parts[0].isdigit():
+            vals[key.strip()] = int(parts[0])
+    if not vals:
+        return None
+    return {
+        "rss_kb": vals.get("Rss", 0),
+        "pss_kb": vals.get("Pss", 0),
+        "uss_kb": vals.get("Private_Clean", 0) + vals.get("Private_Dirty", 0),
+        "swap_kb": vals.get("Swap", 0),
+    }
+
+
+def read_vmstat(keys: tuple[str, ...] | None = None) -> dict[str, int]:
+    """Kernel VM counters (page faults, swap in/out, reclaim, OOM kills)."""
+    out: dict[str, int] = {}
+    try:
+        for line in (PROC / "vmstat").read_text().splitlines():
+            k, _, v = line.partition(" ")
+            if keys is None or k in keys:
+                out[k] = int(v)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+VMSTAT_KEYS = ("pgfault", "pgmajfault", "pswpin", "pswpout", "pgscan_kswapd", "pgsteal_kswapd", "oom_kill")
+
+
+def read_meminfo() -> dict[str, int]:
+    out: dict[str, int] = {}
+    try:
+        for line in (PROC / "meminfo").read_text().splitlines():
+            k, _, rest = line.partition(":")
+            parts = rest.split()
+            if parts:
+                out[k] = int(parts[0])  # kB
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def read_cpu_times() -> dict[str, list[int]]:
+    """Per-CPU jiffy counters from /proc/stat ('cpu' = aggregate)."""
+    out: dict[str, list[int]] = {}
+    try:
+        for line in (PROC / "stat").read_text().splitlines():
+            if line.startswith("cpu"):
+                name, *vals = line.split()
+                out[name] = [int(v) for v in vals]
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def read_proc_stat_counters() -> dict[str, int]:
+    out: dict[str, int] = {}
+    try:
+        for line in (PROC / "stat").read_text().splitlines():
+            parts = line.split()
+            if parts[0] in ("ctxt", "btime", "processes", "procs_running", "procs_blocked"):
+                out[parts[0]] = int(parts[1])
+            elif parts[0] == "intr":
+                out["intr"] = int(parts[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return out
+
+
+def read_oom_score(pid: int) -> tuple[int, int] | None:
+    """(oom_score, oom_score_adj). Higher oom_score = killed first by the OOM killer."""
+    try:
+        score = int((PROC / str(pid) / "oom_score").read_text())
+        adj = int((PROC / str(pid) / "oom_score_adj").read_text())
+        return score, adj
+    except (OSError, ValueError):
+        return None
+
+
 def clock_ticks() -> int:
     try:
         return os.sysconf("SC_CLK_TCK")
@@ -145,7 +241,8 @@ def clock_ticks() -> int:
 
 def capabilities() -> dict[str, bool]:
     """Probe which kernel interfaces are available on this machine."""
-    cgroup_v2 = Path("/sys/fs/cgroup/cgroup.controllers").exists()
+    cgroup_v2 = Path("/sys/fs/cgroup/cgroup.controllers").exists() or Path(
+        "/sys/fs/cgroup/unified/cgroup.controllers").exists()
     return {
         "procfs": is_linux_procfs(),
         "psi": read_pressure("cpu") is not None,
@@ -153,4 +250,7 @@ def capabilities() -> dict[str, bool]:
         "proc_locks": (PROC / "locks").exists(),
         "kmsg_readable": os.access("/dev/kmsg", os.R_OK),
         "syslog_file": Path("/var/log/syslog").exists() or Path("/var/log/messages").exists(),
+        "cgroup_v1": Path("/sys/fs/cgroup/cpu/cpu.shares").exists(),
+        "smaps_rollup": (PROC / "self" / "smaps_rollup").exists(),
+        "btf_ebpf": Path("/sys/kernel/btf/vmlinux").exists(),
     }

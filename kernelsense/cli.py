@@ -24,10 +24,11 @@ pd.set_option("display.max_columns", 20)
 
 
 def cmd_status(args) -> int:
-    from .monitoring import PsutilCollector, detect_anomalies, state_distribution
+    from .monitoring import detect_anomalies, make_collector, state_distribution
     from .monitoring.procfs import capabilities
 
-    c = PsutilCollector()
+    c = make_collector()
+    print("Collector:", type(c).__name__)
     c.processes()
     time.sleep(1)
     s, procs = c.system(), c.processes()
@@ -126,9 +127,9 @@ def cmd_logs(args) -> int:
 
 def cmd_allocate(args) -> int:
     from .allocator import Actuator, SystemState, from_snapshot, recommend
-    from .monitoring import PsutilCollector
+    from .monitoring import make_collector
 
-    c = PsutilCollector()
+    c = make_collector()
     c.processes()
     time.sleep(args.window)
     s, procs = c.system(), c.processes()

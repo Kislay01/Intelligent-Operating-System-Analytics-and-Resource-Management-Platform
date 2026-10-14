@@ -11,7 +11,8 @@ import threading
 import time
 
 from .config import settings
-from .monitoring import PsutilCollector, processes_to_rows
+from .monitoring import processes_to_rows
+from .monitoring.procfs_collector import make_collector
 from .storage import MetricStore
 
 
@@ -20,7 +21,7 @@ class Recorder:
         self.store = store or MetricStore()
         self.interval = interval or settings.sample_interval_s
         self.top_n = top_n or settings.top_n_processes
-        self.collector = PsutilCollector()
+        self.collector = make_collector()
         self.latest_system = None
         self.latest_processes: list = []
         self.samples = 0
