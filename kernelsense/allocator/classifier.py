@@ -56,13 +56,19 @@ def synthetic_dataset(n_per_class: int = 300, seed: int = 0) -> pd.DataFrame:
         "rss_mb": clip(rng.lognormal(5, 0.7, n), 10), "rss_slope": rng.normal(0, 0.2, n),
         "vol_rate": vol, "invol_rate": inv, "io_rate_kb": clip(rng.exponential(15, n), 0, 250),
         "threads": clip(rng.integers(2, 40, n), 1), "label": "Interactive"}))
-    # Memory-heavy: large or growing resident set, moderate CPU
-    vol = clip(rng.gamma(2, 6, n)); inv = clip(rng.gamma(2, 5, n))
+    # Memory-heavy: either a large resident set, or a resident set that keeps growing.
+    # A leak can start small and use almost no CPU - its defining feature is the growth
+    # rate, so the "growing" half deliberately looks idle on every other feature.
+    large = rng.random(n) < 0.5
     frames.append(pd.DataFrame({
-        "cpu_mean": clip(rng.normal(25, 15, n), 0.5, 100), "cpu_std": clip(rng.normal(5, 3, n)),
-        "rss_mb": clip(rng.lognormal(7.3, 0.6, n), 600), "rss_slope": clip(rng.normal(3, 3, n), -1),
-        "vol_rate": vol, "invol_rate": inv, "io_rate_kb": clip(rng.exponential(60, n)),
-        "threads": clip(rng.integers(1, 64, n), 1), "label": "Memory-heavy"}))
+        "cpu_mean": np.where(large, clip(rng.normal(25, 15, n), 0.5, 100), clip(rng.exponential(1.0, n), 0, 30)),
+        "cpu_std": np.where(large, clip(rng.normal(4, 3, n)), clip(rng.exponential(0.3, n))),
+        "rss_mb": np.where(large, clip(rng.lognormal(7.3, 0.6, n), 600), clip(rng.lognormal(4.0, 1.2, n), 5)),
+        "rss_slope": np.where(large, clip(rng.normal(3, 3, n), -1), clip(rng.lognormal(3, 1.2, n), 3)),
+        "vol_rate": np.where(large, clip(rng.gamma(2, 6, n)), clip(rng.exponential(2.0, n))),
+        "invol_rate": np.where(large, clip(rng.gamma(2, 5, n)), clip(rng.exponential(0.3, n))),
+        "io_rate_kb": np.where(large, clip(rng.exponential(60, n)), clip(rng.exponential(3, n))),
+        "threads": clip(rng.integers(1, 32, n), 1), "label": "Memory-heavy"}))
     # Idle: nearly no CPU, rare switches
     vol = clip(rng.exponential(0.3, n)); inv = clip(rng.exponential(0.05, n))
     frames.append(pd.DataFrame({
