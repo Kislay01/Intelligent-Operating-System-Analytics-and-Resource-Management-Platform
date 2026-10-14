@@ -75,7 +75,10 @@ def bankers_risk(state: BankersState) -> RiskReport:
 def graph_risk(rag: ResourceAllocationGraph) -> RiskReport:
     det = rag.detect()
     wfg = rag.wait_for_graph()
-    longest_chain = nx.dag_longest_path_length(wfg) if nx.is_directed_acyclic_graph(wfg) else len(rag.processes)
+    if nx.is_directed_acyclic_graph(wfg):
+        longest_chain = nx.dag_longest_path_length(wfg)
+    else:  # cyclic waiting: size of the largest strongly connected group of waiters
+        longest_chain = max(len(c) for c in nx.strongly_connected_components(wfg))
     waiting = sum(1 for p in rag.processes if any(pp == p for (pp, _) in rag.requested))
     holding_waiting = sum(
         1 for p in rag.processes
