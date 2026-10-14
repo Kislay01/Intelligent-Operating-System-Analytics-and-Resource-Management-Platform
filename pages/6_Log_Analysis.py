@@ -67,12 +67,19 @@ with tab_time:
         st.info("No timestamped lines to build a timeline.")
     else:
         a = anoms.reset_index()
+        # Break the lines across idle gaps (machine off) instead of drawing a diagonal across days.
+        step = pd.Timedelta(window)
+        gaps = a["timestamp"].diff() > step * 1.5
+        if gaps.any():
+            breaks = a.loc[gaps, ["timestamp"]].copy()
+            breaks["timestamp"] = breaks["timestamp"] - step
+            a = pd.concat([a, breaks]).sort_values("timestamp").reset_index(drop=True)
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=a["timestamp"], y=a["lines"], name="All lines", mode="lines",
                                  line=dict(color=SERIES[0], width=2)))
         fig.add_trace(go.Scatter(x=a["timestamp"], y=a["errors"], name="Errors", mode="lines",
                                  line=dict(color=SERIES[1], width=2)))
-        flagged = a[a["anomaly"]]
+        flagged = a[a["anomaly"].fillna(False).astype(bool)]
         fig.add_trace(go.Scatter(x=flagged["timestamp"], y=flagged["lines"], name="Anomaly", mode="markers",
                                  marker=dict(size=12, color=STATUS["critical"], symbol="diamond",
                                              line=dict(color="white", width=2)),
