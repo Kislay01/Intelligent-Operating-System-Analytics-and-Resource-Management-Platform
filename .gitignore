@@ -21,3 +21,4 @@ data/*.db
 data/*.db-journal
 data/actions.log
 workloads/bin/
+data/*.pkl
