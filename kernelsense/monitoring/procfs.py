@@ -253,4 +253,5 @@ def capabilities() -> dict[str, bool]:
         "cgroup_v1": Path("/sys/fs/cgroup/cpu/cpu.shares").exists(),
         "smaps_rollup": (PROC / "self" / "smaps_rollup").exists(),
         "btf_ebpf": Path("/sys/kernel/btf/vmlinux").exists(),
+        "bpftrace": bool(__import__("shutil").which("bpftrace")),
     }
