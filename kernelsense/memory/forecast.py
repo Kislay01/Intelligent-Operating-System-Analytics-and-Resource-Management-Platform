@@ -129,8 +129,83 @@ class HoltForecaster(Forecaster):
             return np.asarray(self._model.forecast(steps), dtype=float)
 
 
-def default_models() -> list[Forecaster]:
-    return [NaiveForecaster(), MovingAverageForecaster(10), LinearTrendForecaster(60), HoltForecaster()]
+class QuantileGBMForecaster(Forecaster):
+    """Gradient-boosted quantile regression on lag features.
+
+    Three HistGradientBoosting models (quantiles 5%, 50%, 95%) predict the next
+    *change* in the series from the last ``lags`` values, rolling statistics
+    and the recent slope. Forecasts are produced recursively: the median step
+    is appended to the history and the model is applied again. The 5%/95%
+    steps accumulate into the prediction interval, so the band reflects what
+    the data says about uncertainty instead of an assumed distribution.
+    """
+
+    name = "Quantile GBM"
+
+    def __init__(self, lags: int = 12, quantiles: tuple[float, float, float] = (0.05, 0.5, 0.95)) -> None:
+        super().__init__()
+        self.lags = lags
+        self.quantiles = quantiles
+
+    def _row(self, hist: np.ndarray) -> list[float]:
+        w = hist[-self.lags:]
+        d = np.diff(w) if len(w) > 1 else np.zeros(1)
+        x = np.arange(len(w))
+        slope = float(np.polyfit(x, w, 1)[0]) if len(w) > 2 else 0.0
+        return [*(w - w[-1]), float(d.mean()), float(d.std()), float(d[-3:].mean()), slope]
+
+    def _fit(self, y):
+        from sklearn.ensemble import HistGradientBoostingRegressor
+
+        if len(y) <= self.lags + 5:
+            raise ValueError(f"Quantile GBM needs more than {self.lags + 5} observations")
+        X = np.array([self._row(y[: i + 1]) for i in range(self.lags - 1, len(y) - 1)])
+        target = np.diff(y)[self.lags - 1:]
+        self._models = []
+        for q in self.quantiles:
+            m = HistGradientBoostingRegressor(loss="quantile", quantile=q, max_iter=150, learning_rate=0.05,
+                                              max_leaf_nodes=15, min_samples_leaf=5, random_state=0)
+            m.fit(X, target)
+            self._models.append(m)
+        self._resid_std = float(np.std(target - self._models[1].predict(X)))
+
+    def _paths(self, steps: int):
+        hist = list(self._y)
+        lo_acc = hi_acc = 0.0
+        mean, lo, hi = [], [], []
+        for _ in range(steps):
+            row = [self._row(np.asarray(hist))]
+            d_lo, d_mid, d_hi = (float(m.predict(row)[0]) for m in self._models)
+            nxt = hist[-1] + d_mid
+            hist.append(nxt)
+            lo_acc += min(d_lo - d_mid, 0.0)
+            hi_acc += max(d_hi - d_mid, 0.0)
+            mean.append(nxt)
+            lo.append(nxt + lo_acc)
+            hi.append(nxt + hi_acc)
+        return np.array(mean), np.array(lo), np.array(hi)
+
+    def _point(self, steps):
+        return self._paths(steps)[0]
+
+    def predict(self, steps: int, z: float = 1.96) -> Forecast:
+        mean, lo, hi = self._paths(steps)
+        return Forecast(self.name, mean, np.maximum(lo, 0.0), hi)
+
+
+def default_models(include_ml: bool = True) -> list[Forecaster]:
+    models: list[Forecaster] = [NaiveForecaster(), MovingAverageForecaster(10), LinearTrendForecaster(60),
+                                HoltForecaster()]
+    if include_ml:
+        models.append(QuantileGBMForecaster())
+    return models
+
+
+def interval_coverage(actual, forecast: Forecast) -> float:
+    """Share of actual values inside the prediction interval (target ~95%)."""
+    a = np.asarray(actual, float)
+    n = min(len(a), len(forecast.mean))
+    return float(np.mean((a[:n] >= forecast.lower[:n]) & (a[:n] <= forecast.upper[:n])))
 
 
 def metrics(actual: np.ndarray, predicted: np.ndarray) -> dict:

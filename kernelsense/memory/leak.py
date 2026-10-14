@@ -6,6 +6,9 @@ plateauing. We fit a linear trend to RSS over time and flag a process when:
 * the slope is above ``min_slope_mb_per_min``
 * the trend explains most of the variation (R^2 >= ``min_r2``)
 * most consecutive samples are non-decreasing (``min_monotonic``)
+* the Mann-Kendall test confirms a statistically significant upward trend
+  (non-parametric, so it is robust to garbage-collection sawtooth patterns
+  and outliers that break the linear fit)
 """
 
 from __future__ import annotations
@@ -14,6 +17,30 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+
+
+def mann_kendall(x: np.ndarray) -> tuple[float, float, float]:
+    """Mann-Kendall trend test. Returns (S, z, two-sided p-value).
+
+    S = sum over i<j of sign(x_j - x_i). Under "no trend", S is approximately
+    normal with variance n(n-1)(2n+5)/18 minus a correction for tied values.
+    """
+    import math
+
+    x = np.asarray(x, dtype=float)
+    n = len(x)
+    if n < 4:
+        return 0.0, 0.0, 1.0
+    diff = np.sign(x[None, :] - x[:, None])
+    s = float(np.triu(diff, k=1).sum())
+    _, counts = np.unique(x, return_counts=True)
+    ties = counts[counts > 1]
+    var = (n * (n - 1) * (2 * n + 5) - np.sum(ties * (ties - 1) * (2 * ties + 5))) / 18.0
+    if var <= 0:
+        return s, 0.0, 1.0
+    z = (s - np.sign(s)) / math.sqrt(var) if s != 0 else 0.0
+    p = math.erfc(abs(z) / math.sqrt(2))
+    return s, float(z), float(p)
 
 
 @dataclass
@@ -28,6 +55,8 @@ class LeakFinding:
     monotonic_ratio: float
     suspected: bool
     projected_mb_1h: float
+    mk_z: float = 0.0
+    mk_p: float = 1.0
 
 
 def analyze_series(ts: np.ndarray, rss_mb: np.ndarray) -> tuple[float, float, float]:
@@ -51,6 +80,7 @@ def detect_leaks(
     min_slope_mb_per_min: float = 1.0,
     min_r2: float = 0.8,
     min_monotonic: float = 0.7,
+    max_p_value: float = 0.01,
 ) -> list[LeakFinding]:
     """``history`` has columns ts, pid, name, rss_mb (as stored by MetricStore)."""
     if history.empty:
@@ -63,7 +93,11 @@ def detect_leaks(
         ts = grp["ts"].to_numpy(float)
         rss = grp["rss_mb"].to_numpy(float)
         slope, r2, mono = analyze_series(ts, rss)
-        suspected = slope >= min_slope_mb_per_min and r2 >= min_r2 and mono >= min_monotonic
+        _, mk_z, mk_p = mann_kendall(rss)
+        significant = mk_z > 0 and mk_p <= max_p_value
+        # A steady linear fit OR a significant monotonic trend (robust to GC sawtooth) qualifies.
+        suspected = slope >= min_slope_mb_per_min and significant and (
+            (r2 >= min_r2 and mono >= min_monotonic) or mk_z >= 4)
         findings.append(
             LeakFinding(
                 pid=int(pid),
@@ -76,6 +110,8 @@ def detect_leaks(
                 monotonic_ratio=round(mono, 3),
                 suspected=suspected,
                 projected_mb_1h=round(float(rss[-1] + slope * 60), 1),
+                mk_z=round(mk_z, 2),
+                mk_p=float(f"{mk_p:.3g}"),
             )
         )
     findings.sort(key=lambda f: (not f.suspected, -f.slope_mb_per_min))
