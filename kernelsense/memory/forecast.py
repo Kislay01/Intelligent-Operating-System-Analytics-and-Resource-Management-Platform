@@ -49,7 +49,8 @@ class Forecaster(ABC):
         mean = self._point(steps)
         # interval widens with horizon (random-walk style growth of uncertainty)
         width = z * self._resid_std * np.sqrt(np.arange(1, steps + 1))
-        return Forecast(self.name, mean, mean - width, mean + width)
+        # memory quantities cannot be negative
+        return Forecast(self.name, mean, np.maximum(mean - width, 0.0), mean + width)
 
 
 class NaiveForecaster(Forecaster):
