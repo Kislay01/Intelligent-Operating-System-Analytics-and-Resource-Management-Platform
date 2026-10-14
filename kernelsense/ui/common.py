@@ -22,6 +22,8 @@ NEUTRAL = "#b7b5ac"
 SEVERITY_ICON = {"critical": "🔴", "warning": "🟠", "info": "🔵", "good": "🟢"}
 
 pio.templates["kernelsense"] = go.layout.Template(
+    # keep outside value labels visible instead of clipping them at the plot edge
+    data=dict(bar=[go.Bar(cliponaxis=False)]),
     layout=go.Layout(
         colorway=SERIES,
         font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif", color=INK["secondary"], size=13),
@@ -33,7 +35,7 @@ pio.templates["kernelsense"] = go.layout.Template(
         yaxis=dict(gridcolor=INK["grid"], linecolor=INK["axis"], zeroline=False, tickfont=dict(color=INK["muted"]),
                    automargin=True),
         legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1, title_text=""),
-        margin=dict(l=56, r=16, t=64, b=44),
+        margin=dict(l=56, r=48, t=64, b=44),
         hoverlabel=dict(bgcolor="white", font=dict(color=INK["primary"])),
         bargap=0.25,
     )

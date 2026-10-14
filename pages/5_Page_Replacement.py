@@ -22,7 +22,7 @@ c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
 mode = c1.radio("Reference string", ["Generate", "Custom"], horizontal=True)
 frames = c2.number_input("Frames", 1, 12, 3)
 if mode == "Generate":
-    pattern = c3.selectbox("Pattern", list(PATTERNS), format_func=lambda p: p, index=1)
+    pattern = c3.selectbox("Pattern", list(PATTERNS), format_func=lambda p: p, index=0)
     length = c4.number_input("Length", 5, 200, 20)
     refs = generate(pattern, int(length), 10, seed=7)
     st.caption(PATTERNS[pattern])
