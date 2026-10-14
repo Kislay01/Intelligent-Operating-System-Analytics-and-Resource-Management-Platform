@@ -1,6 +1,9 @@
 """Log ingestion, parsing, OS event detection and anomaly detection."""
 
 from .anomaly import detect_anomalies, top_sources, window_features
+from .correlate import correlate, incident_timeline, metric_anomalies
+from .drain import Drain, grouping_accuracy
+from .sequence import NGramSequenceModel
 from .events import RULES, classify_message, detect_events, event_summary
 from .parser import SEVERITY_ORDER, LogRecord, infer_severity, parse_line, parse_text
 from .sources import available_sources, boot_time, read_dmesg, read_journal, read_syslog_file, sample_log
@@ -28,6 +31,7 @@ def load(source: str = "auto", lines: int = 5000, path: str | None = None, min_l
 
 
 __all__ = [
+    "Drain", "NGramSequenceModel", "correlate", "grouping_accuracy", "incident_timeline", "metric_anomalies",
     "LogRecord", "RULES", "SEVERITY_ORDER", "available_sources", "boot_time", "classify_message",
     "detect_anomalies", "detect_events", "event_summary", "infer_severity", "load", "parse_line", "parse_text",
     "read_dmesg", "read_journal", "read_syslog_file", "sample_log", "top_sources", "window_features",
