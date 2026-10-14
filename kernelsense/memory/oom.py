@@ -56,7 +56,7 @@ def candidates(top: int = 10) -> list[OOMCandidate]:
         pid = int(entry)
         score = procfs.read_oom_score(pid)
         status = procfs.read_status(pid)
-        if not score or not status:
+        if not score or not status or "VmRSS" not in status:  # kernel threads have no user memory
             continue
         rss = _status_kb(status, "VmRSS")
         swap = _status_kb(status, "VmSwap")
