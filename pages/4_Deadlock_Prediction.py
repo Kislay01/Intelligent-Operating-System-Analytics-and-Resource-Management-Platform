@@ -39,9 +39,8 @@ def matrix_df(mat, rows, cols):
     return pd.DataFrame(mat, index=rows, columns=cols)
 
 
-tab_bank, tab_rag, tab_live, tab_lockdep = st.tabs(["Banker's algorithm (avoidance)", "Resource allocation graph (detection)",
-                                                    "Lock-order validation (lockdep)",
-                                       "Live system"])
+tab_bank, tab_rag, tab_lockdep, tab_live = st.tabs(["Banker's algorithm (avoidance)", "Resource allocation graph (detection)",
+                                                    "Lock-order validation (lockdep)", "Live system"])
 
 # --------------------------------------------------------------- Banker's
 with tab_bank:
@@ -241,14 +240,14 @@ with tab_lockdep:
             fig.add_annotation(x=pos[v][0], y=pos[v][1], ax=pos[u][0], ay=pos[u][1], xref="x", yref="y", axref="x",
                                ayref="y", showarrow=True, arrowhead=3, arrowsize=1.4, arrowwidth=2,
                                arrowcolor=SERIES[1] if (u in cyc_nodes and v in cyc_nodes) else SERIES[0],
-                               standoff=20, startstandoff=20)
+                               standoff=14, startstandoff=14)
         nodes = list(G.nodes())
         fig.add_trace(go.Scatter(x=[pos[n][0] for n in nodes], y=[pos[n][1] for n in nodes], mode="markers+text",
-                                 text=nodes, marker=dict(size=46, symbol="square",
+                                 text=nodes, textposition="bottom center", marker=dict(size=30, symbol="square",
                                                          color=[STATUS["critical"] if n in cyc_nodes else "#cde2fb"
                                                                 for n in nodes], line=dict(color=INK["axis"], width=2)),
                                  textfont=dict(size=10, color=INK["primary"]), hovertemplate="%{text}<extra></extra>"))
-        fig.update_xaxes(visible=False)
+        fig.update_xaxes(visible=False, range=[-1.4, 1.4])
         fig.update_yaxes(visible=False, scaleanchor="x")
         show(style(fig, 400, "Lock-order graph (edge A→B: B acquired while holding A)"), "lockgraph")
     with b:
