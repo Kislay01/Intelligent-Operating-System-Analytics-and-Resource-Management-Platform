@@ -8,6 +8,13 @@ Examples:
     python -m kernelsense bankers
     python -m kernelsense logs --source auto
     python -m kernelsense allocate --apply
+    python -m kernelsense trace --duration 5 --out trace.json
+    python -m kernelsense export --port 9877
+    python -m kernelsense control --batch-pids 123 456 --interactive-pids 789 --duration 60
+    python -m kernelsense lockdep
+    python -m kernelsense oom
+    python -m kernelsense loghub
+    python -m kernelsense paging --trace matmul_naive --frames 8
 """
 
 from __future__ import annotations
@@ -84,8 +91,15 @@ def cmd_schedule(args) -> int:
 def cmd_paging(args) -> int:
     from .paging import compare, detect_belady, generate, parse_refs
 
-    refs = parse_refs(args.refs) if args.refs else generate(args.pattern, args.length, args.pages)
-    print("Reference string:", " ".join(map(str, refs)))
+    if args.trace:
+        from .paging.traces import algorithmic
+
+        refs = algorithmic(args.trace)
+        print(f"Trace {args.trace}: {len(refs)} references, {len(set(refs))} distinct pages")
+    else:
+        refs = parse_refs(args.refs) if args.refs else generate(args.pattern, args.length, args.pages)
+    if not args.trace:
+        print("Reference string:", " ".join(map(str, refs)))
     print(pd.DataFrame([r.summary() for r in compare(refs, args.frames)]).to_string(index=False))
     for case in detect_belady(refs, max_frames=max(args.frames + 3, 6)):
         print(f"Belady's anomaly (FIFO): {case.frames_low} frames -> {case.faults_low} faults, "
@@ -143,6 +157,89 @@ def cmd_allocate(args) -> int:
     return 0
 
 
+def cmd_trace(args) -> int:
+    from .scheduling import recommend
+    from .scheduling.trace import capture
+
+    tr = capture(args.duration, args.interval)
+    df = tr.frame()
+    print(f"Captured {len(df)} bursts from {df['pid'].nunique() if len(df) else 0} processes")
+    if len(df):
+        print(df.groupby("name")["length_ms"].agg(["count", "mean", "max"]).sort_values("count", ascending=False)
+              .head(10).round(1).to_string())
+        jobs = tr.to_jobs()
+        if len(jobs) >= 3:
+            rec = recommend(jobs, args.goal, practical_only=True)
+            print(f"Replayed {len(jobs)} bursts -> recommended: {rec.best}")
+    if args.out:
+        print("saved", tr.save(args.out))
+    return 0
+
+
+def cmd_export(args) -> int:
+    from .exporter import serve
+
+    srv = serve(args.port, args.host)
+    print(f"Serving Prometheus metrics on http://{args.host}:{args.port}/metrics (Ctrl+C to stop)")
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        srv.shutdown()
+    return 0
+
+
+def cmd_control(args) -> int:
+    from .allocator.controller import ClosedLoopController, ControllerConfig
+
+    cfg = ControllerConfig(policy=args.policy, mode=args.mode, interval=args.interval)
+    ctl = ClosedLoopController(args.batch_pids, args.interactive_pids, cfg)
+    print(f"Controlling {len(args.batch_pids)} batch processes with policy={args.policy}, mode={args.mode}")
+    try:
+        end = time.time() + args.duration
+        while time.time() < end:
+            d = ctl.step()
+            psi = f"{d.psi_before}->{d.psi_after}" if d.psi_before is not None else "n/a"
+            print(f"state={d.state} nice={d.nice} applied={d.applied} psi={psi} {d.note}")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        ctl.close(restore=not args.keep)
+    return 0
+
+
+def cmd_lockdep(args) -> int:
+    from .deadlock.lockdep import demo_dining_philosophers, demo_inversion
+    from .deadlock.seeded import benchmark
+
+    for title, mon in (("Inverted lock order (never actually deadlocks)", demo_inversion()),
+                       ("Dining philosophers, no ordering", demo_dining_philosophers()),
+                       ("Dining philosophers, resource ordering", demo_dining_philosophers(ordered=True))):
+        rep = mon.report()
+        print(f"{title}: {rep['violations']} violation(s)")
+        for d in rep["details"]:
+            print("   ", d)
+    r = benchmark(args.programs)
+    print({k: v for k, v in r.items() if k != "table"})
+    return 0
+
+
+def cmd_oom(args) -> int:
+    from .memory import oom
+
+    print(oom.frame(args.top).to_string(index=False))
+    print(oom.prediction(None)["message"])
+    return 0
+
+
+def cmd_loghub(args) -> int:
+    import json
+
+    from .logs import loghub
+
+    print(json.dumps(loghub.run_all(), indent=2))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     warnings.filterwarnings("ignore")
     p = argparse.ArgumentParser(prog="kernelsense", description="Intelligent OS analytics and resource management")
@@ -171,6 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--pattern", default="locality")
     g.add_argument("--length", type=int, default=30)
     g.add_argument("--pages", type=int, default=10)
+    g.add_argument("--trace", help="algorithmic trace name, e.g. matmul_naive, matrix_col_major")
     g.set_defaults(func=cmd_paging)
 
     b = sub.add_parser("bankers", help="Banker's algorithm on the textbook example")
@@ -186,6 +284,38 @@ def main(argv: list[str] | None = None) -> int:
     a.add_argument("--apply", action="store_true", help="apply actions (default is dry-run)")
     a.add_argument("--window", type=float, default=2.0)
     a.set_defaults(func=cmd_allocate)
+
+    t = sub.add_parser("trace", help="capture live CPU bursts and replay them through the schedulers")
+    t.add_argument("--duration", type=float, default=5)
+    t.add_argument("--interval", type=float, default=20, help="sampling interval in ms")
+    t.add_argument("--goal", default="interactive")
+    t.add_argument("--out")
+    t.set_defaults(func=cmd_trace)
+
+    e = sub.add_parser("export", help="Prometheus metrics endpoint")
+    e.add_argument("--port", type=int, default=9877)
+    e.add_argument("--host", default="0.0.0.0")
+    e.set_defaults(func=cmd_export)
+
+    c = sub.add_parser("control", help="closed-loop controller for batch processes")
+    c.add_argument("--batch-pids", type=int, nargs="+", required=True)
+    c.add_argument("--interactive-pids", type=int, nargs="*", default=[])
+    c.add_argument("--policy", default="q", choices=["none", "rule", "q", "bandit"])
+    c.add_argument("--mode", default="nice", choices=["nice", "cgroup"])
+    c.add_argument("--interval", type=float, default=2.0)
+    c.add_argument("--duration", type=float, default=60)
+    c.add_argument("--keep", action="store_true", help="keep the last setting on exit")
+    c.set_defaults(func=cmd_control)
+
+    ld = sub.add_parser("lockdep", help="lock-order validation demos and seeded-bug benchmark")
+    ld.add_argument("--programs", type=int, default=100)
+    ld.set_defaults(func=cmd_lockdep)
+
+    o = sub.add_parser("oom", help="OOM-killer victim ranking")
+    o.add_argument("--top", type=int, default=10)
+    o.set_defaults(func=cmd_oom)
+
+    sub.add_parser("loghub", help="evaluate log parsing/anomaly detection on Loghub").set_defaults(func=cmd_loghub)
 
     args = p.parse_args(argv)
     return args.func(args)
